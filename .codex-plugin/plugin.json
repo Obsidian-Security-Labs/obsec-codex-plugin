@@ -1,0 +1,43 @@
+{
+  "name": "bastion-codex-plugin",
+  "version": "0.1.0",
+  "description": "Inspect SaaS security posture in Codex and sync findings to Obsidian.",
+  "license": "MIT",
+  "author": {
+    "name": "Obsidian Security",
+    "url": "https://www.obsidiansecurity.com/",
+    "email": "support@obsidiansecurity.com"
+  },
+  "homepage": "https://www.obsidiansecurity.com/",
+  "repository": "https://gitlab.com/obsec1/dataplatform/bastion-codex-public",
+  "keywords": [
+    "browser",
+    "posture",
+    "saas",
+    "security",
+    "sspm"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Obsidian Security",
+    "shortDescription": "Inspect SaaS posture with guarded browser actions",
+    "longDescription": "Inspect SaaS settings through ObSec browser guardrails and sync them through Obsidian.",
+    "developerName": "Obsidian Security",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Scrape ElevenLabs for posture settings.",
+      "Upload these posture settings to Obsidian.",
+      "Summarize our current posture scores."
+    ],
+    "brandColor": "#0985e3",
+    "composerIcon": "./assets/icon.png",
+    "logo": "./assets/icon.png",
+    "websiteURL": "https://www.obsidiansecurity.com/"
+  }
+}

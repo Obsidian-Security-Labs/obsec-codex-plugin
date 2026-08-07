@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "obsec": {
+      "command": "/bin/sh",
+      "args": ["./mcp/launch.sh"],
+      "cwd": ".",
+      "env_vars": ["OBSIDIAN_API_SERVER", "OBSIDIAN_API_TOKEN"],
+      "required": true,
+      "tool_timeout_sec": 120,
+      "default_tools_approval_mode": "writes"
+    }
+  }
+}

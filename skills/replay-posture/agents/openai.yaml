@@ -1,0 +1,4 @@
+interface:
+  display_name: "Replay Posture Inspection"
+  short_description: "Rerun a saved SaaS posture inspection"
+  default_prompt: "Use $replay-posture to rerun the saved ElevenLabs inspection."

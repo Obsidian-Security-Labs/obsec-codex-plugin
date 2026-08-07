@@ -1,0 +1,4 @@
+interface:
+  display_name: "Build Posture Summary"
+  short_description: "Generate a local posture summary page"
+  default_prompt: "Use $posture-summary-page to regenerate the SaaS posture report."

@@ -1,0 +1,84 @@
+// Copyright © 2026 Obsidian Security. All rights reserved.
+
+entity Agent;
+entity File;
+entity Command;
+entity Host;
+entity Resource;
+
+action ReadFile appliesTo {
+  principal: [Agent],
+  resource: [File],
+  context: {
+    "interactive": Bool,
+    "playbookMode": Bool,
+    "toolName": String,
+    "operationClass": String,
+  }
+};
+
+action WriteFile appliesTo {
+  principal: [Agent],
+  resource: [File],
+  context: {
+    "interactive": Bool,
+    "playbookMode": Bool,
+    "toolName": String,
+    "operationClass": String,
+  }
+};
+
+action RunCommand appliesTo {
+  principal: [Agent],
+  resource: [Command],
+  context: {
+    "interactive": Bool,
+    "playbookMode": Bool,
+    "toolName": String,
+    "operationClass": String,
+  }
+};
+
+action NetworkRequest appliesTo {
+  principal: [Agent],
+  resource: [Host],
+  context: {
+    "interactive": Bool,
+    "playbookMode": Bool,
+    "toolName": String,
+    "operationClass": String,
+  }
+};
+
+action BrowserMutation appliesTo {
+  principal: [Agent],
+  resource: [Host],
+  context: {
+    "interactive": Bool,
+    "playbookMode": Bool,
+    "toolName": String,
+    "operationClass": String,
+  }
+};
+
+action PostureRuleMutation appliesTo {
+  principal: [Agent],
+  resource: [Resource],
+  context: {
+    "interactive": Bool,
+    "playbookMode": Bool,
+    "toolName": String,
+    "operationClass": String,
+  }
+};
+
+action ObsidianMutation appliesTo {
+  principal: [Agent],
+  resource: [Resource],
+  context: {
+    "interactive": Bool,
+    "playbookMode": Bool,
+    "toolName": String,
+    "operationClass": String,
+  }
+};

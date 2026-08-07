@@ -1,0 +1,4 @@
+interface:
+  display_name: "Manage Posture Rules"
+  short_description: "List, preview, and manage posture rules"
+  default_prompt: "Use $obsidian-posture-rules to create rules for these settings."

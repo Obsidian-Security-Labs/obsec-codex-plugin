@@ -1,0 +1,4 @@
+interface:
+  display_name: "Build Community Connector"
+  short_description: "Build an Obsidian Community Connector"
+  default_prompt: "Use $obsidian-cce-builder to build a connector for this SaaS."

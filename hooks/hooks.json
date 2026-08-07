@@ -1,0 +1,18 @@
+{
+  "description": "Evaluate ObSec Cedar guardrails before shell, browser, and Obsidian calls.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "^(Bash|mcp__obsec(?:__)?[A-Za-z0-9_]+|mcp__node_repl(?:__)?js)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/bin/sh \"${PLUGIN_ROOT}/hooks/launch.sh\"",
+            "timeout": 30,
+            "statusMessage": "Checking ObSec guardrails"
+          }
+        ]
+      }
+    ]
+  }
+}

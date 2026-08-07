@@ -1,0 +1,4 @@
+interface:
+  display_name: "Review Posture History"
+  short_description: "Review prior SaaS posture inspection runs"
+  default_prompt: "Use $posture-history to show what changed in recent runs."

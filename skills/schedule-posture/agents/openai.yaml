@@ -1,0 +1,4 @@
+interface:
+  display_name: "Schedule Posture Replay"
+  short_description: "Schedule recurring SaaS posture inspections"
+  default_prompt: "Use $schedule-posture to schedule a daily posture replay."

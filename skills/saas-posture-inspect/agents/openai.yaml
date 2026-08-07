@@ -1,0 +1,4 @@
+interface:
+  display_name: "Inspect SaaS Posture"
+  short_description: "Inspect SaaS security settings in Browser"
+  default_prompt: "Use $saas-posture-inspect to inspect ElevenLabs security settings."

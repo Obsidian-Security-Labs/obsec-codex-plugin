@@ -1,0 +1,4 @@
+interface:
+  display_name: "Push Posture Settings"
+  short_description: "Find a connection and upload SaaS settings"
+  default_prompt: "Use $obsidian-push-posture to upload these settings to Obsidian."
