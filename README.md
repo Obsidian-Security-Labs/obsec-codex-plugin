@@ -1,199 +1,179 @@
-# ObSec Codex plugin
+# Obsidian Security Codex Plugin
 
-This repository contains the self-contained Codex plugin and its Git-backed
-marketplace. The internal development checkout also contains maintainer source
-and verification tooling; the public mirror contains only the distributable
-plugin artifacts.
+Inspect your SaaS security settings and synchronize findings with Obsidian
+Security, directly from Codex. The Obsidian Security Codex Plugin provides
+guided workflows for reviewing authentication, access controls, audit settings,
+and other security posture information through the Codex in-app Browser.
 
-## Contents
+You can ask Codex to:
 
-| Path | Purpose |
-| --- | --- |
-| `.agents/plugins/marketplace.json` | Repo marketplace catalog |
-| `.codex-plugin/plugin.json` | Codex plugin manifest |
-| `.mcp.json` | Local ObSec MCP server and native approval policy |
-| `mcp/launch.sh` | MCP launcher |
-| `hooks/hooks.json` | Cedar pre-tool guardrail wiring |
-| `hooks/launch.sh` | Cedar hook launcher |
-| `runtime/` | Bundled MCP server, Cedar hook, compact browser executor, and Cedar runtime |
-| `policies/` | Bundled Cedar policy and schema |
-| `skills/` | Codex-native workflow entrypoints |
+- Inspect a SaaS application's security settings.
+- Upload collected posture findings to Obsidian Security.
+- Summarize posture scores and review changes over time.
+- Create reusable inspection playbooks and schedule posture workflows.
 
-The Codex in-app Browser handles navigation, snapshots, authentication, and the
-actual interaction. Before each element mutation, ObSec moves the Browser's
-visible pointer to the target and calls one write-annotated MCP tool. Initial
-direct navigation uses that same tool without a pointer. Codex routes native
-approval to the user or automatic review, then ObSec issues a short-lived,
-single-use receipt for that exact action. The returned call is deliberately
-small: it passes only an opaque receipt token to a bundled browser executor.
-The executor atomically claims the receipt and validates its stored tab, host,
-locator, fingerprint, and pointer point before acting, including when an outer
-tool wrapper prevents the `PreToolUse` hook from seeing the nested execution.
-When the hook sees a direct call, it verifies the exact code and reruns Cedar
-without consuming the receipt before the runtime. The same hook blocks direct
-browser mutation commands, including unapproved navigation, reload, back, and
-forward calls.
+## Prerequisites
 
-For a rendered navigation-only link, `follow_link` validates its exact locator,
-canonical href, pointer point, current host, and explicit destination host
-before navigating the current controlled tab. This avoids a second approval for
-same-host and reviewed cross-host `target="_blank"` links. After any other
-approved click, the receipt-bound code detects whether that click opened one
-new top-level tab. It prepares a Codex-controlled replacement for
-the exact resulting URL, which still requires its own native navigation
-approval. At a turn boundary, the skills preserve a work-in-progress or final
-tab with the Browser's supported `tabs.finalize()` API.
+Before installing, make sure you have:
 
+- A Codex desktop environment with Plugins access and the in-app Browser plugin
+  available. Browser inspection workflows require the in-app Browser.
+- The Codex CLI and Git installed on the same machine. Run
+  `codex plugin --help` to confirm your CLI supports plugin installation.
+- A macOS or Linux host with `/bin/sh` and Node.js 22 or newer. The launchers use
+  a compatible Node.js on `PATH`, then try Codex's bundled runtime if available.
+  Host runtime support alone does not provide the required desktop Browser.
+- An Obsidian Security API server URL and API token for your organization.
+  Contact your Obsidian Security administrator if you need these details.
+- Access to the SaaS applications you want to inspect, with permission to view
+  the relevant security settings.
+
+The plugin includes its runtime dependencies. You do not need to clone this
+repository, build the plugin, or install npm packages.
 
 ## Installation
 
-Add this Git-backed marketplace with Codex:
+### 1. Install the plugin
+
+Run these commands in a terminal:
 
 ```bash
 codex plugin marketplace add \
-  https://gitlab.com/obsec1/dataplatform/bastion-codex-public.git
+  https://github.com/Obsidian-Security-Labs/obsec-codex-plugin.git
+codex plugin add obsec-codex-plugin@bastion-codex
+codex plugin list --json
 ```
 
-For local development, add the repository checkout instead:
+In the final command's output, confirm that
+`obsec-codex-plugin@bastion-codex` appears under `installed` with both
+`installed` and `enabled` set to `true`.
 
-```bash
-codex plugin marketplace add "$PWD"
-```
+The command uses the plugin's package identifier. In the plugin directory, the
+Obsidian Security Codex Plugin currently appears as **Obsidian Security** under
+**Obsidian Security Plugins**.
 
-Open the Plugins Directory in the ChatGPT desktop app, select **Obsidian
-Security Plugins**, and install **Obsidian Security**. Alternatively, install it
-from the command line after adding the marketplace:
+For general plugin management, see the
+[OpenAI plugin documentation](https://learn.chatgpt.com/docs/plugins).
 
-```bash
-codex plugin add bastion-codex-plugin@bastion-codex
-```
+### 2. Connect to Obsidian Security
 
-Start a new Codex task after installing or upgrading so the updated skills
-load. Refresh an existing checkout with
-`codex plugin marketplace upgrade bastion-codex`.
+Set these variables in the environment that launches your Codex desktop app,
+using your organization's approved secret-management process:
 
-### Copy-paste setup prompt
+| Variable | Value |
+| --- | --- |
+| `OBSIDIAN_API_SERVER` | Your organization's Obsidian Security API server URL |
+| `OBSIDIAN_API_TOKEN` | Your Obsidian Security API token |
 
-Paste the prompt below into a local coding agent to automate the safe parts of
-installation or upgrade. The agent will leave API-token entry, app restart, and
-hook trust to you because those steps require a secret or an explicit user
-decision.
+Keep the token out of chat, command-line arguments, repository files, and Codex
+configuration files. A variable set in a terminal is not necessarily available
+to an app launched from your desktop; configure the environment used by the app
+itself.
 
-```text
-Set up the Obsidian Security Codex plugin on this machine.
-
-Use this marketplace:
-https://gitlab.com/obsec1/dataplatform/bastion-codex-public.git
-
-Plugin selector: bastion-codex-plugin@bastion-codex
-
-Requirements:
-1. Never ask me to paste OBSIDIAN_API_TOKEN into chat. Never read, print, log,
-   copy, or pass its value in a shell command. Do not put the token in a config
-   file.
-2. Confirm this is macOS or Linux, `codex` is installed, and its `plugin`
-   command is available. Stop with a clear explanation if a prerequisite is
-   missing.
-3. Inspect configured marketplaces with `codex plugin marketplace list --json`.
-   If `bastion-codex` is absent, add the Git marketplace above. If it is already
-   present, upgrade it instead.
-4. Install or refresh the plugin with
-   `codex plugin add bastion-codex-plugin@bastion-codex`.
-5. Safely update `~/.codex/config.toml` so `shell_environment_policy.exclude`
-   contains `"OBSIDIAN_API_TOKEN"`. Preserve every existing setting and every
-   existing excluded variable. If the file cannot be merged safely, show me
-   the proposed non-secret edit and ask before changing it.
-6. Verify installation with `codex plugin list --json`. Do not clone this
-   repository, run its build, or install its development dependencies.
-7. Report what you changed, then tell me to:
-   - securely set OBSIDIAN_API_SERVER and OBSIDIAN_API_TOKEN in the environment
-     that launches the ChatGPT desktop app (without sharing the token with you),
-   - enable the Codex in-app Browser plugin,
-   - restart the app and start a new Codex task,
-   - open `/hooks` and review and trust the ObSec hook, and
-   - open `/mcp` and confirm the required `obsec` server initialized.
-
-Ask for approval only when your execution environment requires it. Do not
-claim the setup is complete until the CLI verification succeeds; list any
-remaining manual steps separately.
-```
-
-## Runtime setup
-
-Enable the Codex in-app Browser plugin. Sign in inside the in-app Browser
-when a SaaS tenant requires authentication. Never put credentials in chat.
-
-The plugin currently supports macOS and Linux hosts with `/bin/sh`. The local
-MCP server and guardrail hook require Node.js 22 or newer. The MCP
-launcher first uses Node.js from `PATH`, then falls back to Codex's bundled
-Node.js runtime. The committed bundles do not require `tsx`, npm, pnpm, or a
-separate SDK installation.
-
-Set both of these environment variables in the Codex process environment:
-
-- `OBSIDIAN_API_TOKEN`
-- `OBSIDIAN_API_SERVER`
-
-Never paste the token into a prompt or pass it as a command-line argument.
-
-## Guardrails and approvals
-
-Codex starts the bundled MCP server locally over stdio. The `.mcp.json`
-configuration forwards the token to that process. Keep the token out of
-arbitrary shell commands by excluding it from Codex's shell environment:
+In your Codex configuration file (`~/.codex/config.toml` by default, or
+`$CODEX_HOME/config.toml` if you use a custom Codex home), exclude the token from
+agent shell commands:
 
 ```toml
 [shell_environment_policy]
 exclude = ["OBSIDIAN_API_TOKEN"]
 ```
 
-- Read-only MCP tools run without an approval prompt.
-- Every MCP mutation is marked as a write. With
-  `default_tools_approval_mode: "writes"`, Codex asks for native approval before
-  sending the tool call to the server.
-- In Ask for approval, the user reviews the request. In Approve for me, Codex
-  automatic review evaluates the same request. Both use Codex's interactive
-  `default` or `acceptEdits` hook permission mode.
-- ObSec instructs automatic review to deny check, uncheck, fill, type, select,
-  press, double-click, and any state-changing or ambiguous click, even when the
-  user requested it. The agent must stop and ask the user after that denial.
-  Only direct navigation, exact `follow_link`, and clearly read-only UI
-  navigation are eligible for automatic approval.
-- In Full access (`bypassPermissions`) mode, mutations proceed without a prompt,
-  but Cedar checks and browser approval receipts remain enforced.
-- The hook denies mutations in `Never ask`, plan, or unknown modes because those
-  modes cannot surface the required approval and do not explicitly grant Full
-  access.
-- The Cedar hook can deny a call but cannot approve it or create a confirmation
-  dialog. Approval remains a Codex host decision.
-- The MCP server evaluates Cedar again immediately before an operation so the
-  hook is not the sole enforcement boundary.
-- Automatic review remains model-evaluated rather than a deterministic security
-  boundary. See
-  [`docs/auto-review-policy.md`](docs/auto-review-policy.md) for recommended
-  reviewer guidance and deterministic-policy boundaries.
-- Browser mutations must use current in-app Browser snapshots. The visible
-  pointer moves to the target before approval. Approved receipts expire after
-  30 seconds, are single-use, and are rejected when the host, pointer target,
-  target fingerprint, or receipt changes. The runtime returns non-sensitive
-  approval handoff, verification, execution, and total timings.
-- Initial direct navigation uses the same approval tool. After that, SaaS
-  navigation must use rendered links and buttons through the guarded
-  visible-pointer flow; known URLs cannot substitute for approval.
-- Redirected navigation reports its actual final host and URL. A click-created
-  tab is copied into a blank controlled replacement only after the exact
-  destination receives a second host-aware approval.
-- Navigation-only rendered links use one guarded `follow_link` approval with an
-  explicit destination host. Exact text fingerprints narrow CSS targets before
-  uniqueness checks, relative and absolute hrefs compare canonically, and
-  receipt calls contain only an opaque token.
-- Scheduled browser applies can skip the interactive prompt only when their
-  named playbook has `guardrails.autoConfirmBrowserMutations: true`. Cedar and
-  stale-ref checks still run.
+If this section or list already exists, add `"OBSIDIAN_API_TOKEN"` to the
+existing list. Preserve your other settings and excluded variables, and do not
+create a duplicate TOML section. The plugin's MCP configuration separately
+forwards the API variables to its local server.
 
-After installing or changing the plugin, start a new Codex task. Open `/hooks`
-to review and trust the current hook definition, then open `/mcp` to verify that
-the `obsec` server initialized.
+### 3. Enable the Browser and verify the connection
 
-Use [`docs/approve-for-me-validation.md`](docs/approve-for-me-validation.md) to
-compare Ask for approval and Approve for me against the same SaaS workflow.
+1. Enable the Codex in-app Browser plugin.
+2. Restart your desktop app after configuring its environment, then start a new
+   Codex task to load the installed plugin.
+3. Open `/hooks`, review the plugin's hook, and trust it. Its current description
+   is **Evaluate ObSec Cedar guardrails before shell, browser, and Obsidian calls.**
+4. Open `/mcp` and confirm that the `obsec` server initialized successfully.
+5. Use **Ask for approval** for your first inspection.
+
+Installation is ready to use once the plugin is installed and enabled, its hook
+is trusted, and the MCP server has initialized. API access and SaaS permissions
+are verified when you use the corresponding workflow.
+
+## Your first inspection
+
+Start a new Codex task and try:
+
+```text
+Use the Obsidian Security Codex Plugin to inspect the security settings
+of my SaaS application. Start at <your application's sign-in URL> and
+summarize the findings.
+```
+
+Replace the placeholder with your application's URL. If authentication is
+required, sign in directly in the in-app Browser and tell Codex when you are
+ready. Do not share passwords or tokens in chat.
+
+Review each approval request against the intended application and action. When
+the inspection is complete, you can ask:
+
+```text
+Upload these posture findings to Obsidian Security.
+```
+
+## Approvals and security controls
+
+The plugin runs an MCP server locally and checks supported operations against
+bundled Cedar policies. Browser actions use approvals tied to the specific tab
+and target; expired or changed targets require a fresh request.
+
+- **Ask for approval:** Review requests before guarded Browser actions and MCP
+  writes run. Read-only MCP tools do not require write approval.
+- **Approve for me:** Codex's automatic reviewer evaluates requests. The plugin's
+  guidance limits automatic approval to navigation and clearly read-only UI
+  actions. Changes to application settings require your attention after a
+  denial. Automatic review is model-based and is not a deterministic security
+  boundary.
+- **Full access:** Actions can proceed without an approval prompt. The plugin's
+  policy and Browser receipt checks still apply to guarded operations.
+- Modes that cannot show approvals and do not explicitly grant Full access are
+  rejected for guarded mutations.
+
+Scheduled Browser changes require explicit opt-in through the playbook setting
+`guardrails.autoConfirmBrowserMutations: true`; policy and stale-target checks
+still apply. Review a playbook before enabling unattended changes.
+
+For more detail, see the [approval policy guide](docs/auto-review-policy.md).
+
+## Updating
+
+Refresh the marketplace and reinstall the plugin from the refreshed snapshot:
+
+```bash
+codex plugin marketplace upgrade bastion-codex
+codex plugin add obsec-codex-plugin@bastion-codex
+codex plugin list --json
+```
+
+Start a new Codex task after updating. Review and trust any updated hook
+configuration in `/hooks`, then check the server in `/mcp`.
+
+## Troubleshooting
+
+- **`codex` or its `plugin` command is unavailable:** Install or update the
+  Codex CLI to a release with plugin support.
+- **The marketplace cannot be downloaded or Git requests a login:** Confirm the
+  repository URL and network access. Contact Obsidian Security support if the
+  installation URL requires access you do not have.
+- **The plugin does not appear in a task:** Confirm it is installed and enabled
+  with `codex plugin list --json`, then start a new task.
+- **The MCP server or hook cannot start:** Confirm Node.js 22 or newer is
+  available to the desktop app and review the error in `/mcp` or `/hooks`.
+- **Obsidian API requests fail:** Verify the app receives both API environment
+  variables and that your token has the required access. Do not include the
+  token in diagnostics.
+- **Browser actions are blocked:** Confirm the in-app Browser is enabled, the
+  hook is trusted, and the task uses a supported approval mode.
+
+For help with the Obsidian Security Codex Plugin, contact
+[support@obsidiansecurity.com](mailto:support@obsidiansecurity.com). Include the
+plugin version and a redacted error message.
+

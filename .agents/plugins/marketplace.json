@@ -5,7 +5,7 @@
   },
   "plugins": [
     {
-      "name": "bastion-codex-plugin",
+      "name": "obsec-codex-plugin",
       "source": {
         "source": "local",
         "path": "./"

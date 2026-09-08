@@ -1,57 +1,32 @@
-![](images/obsidian-header.png)
+# Obsidian Security Codex Plugin User Guide
 
-# ObSec Codex Plugin - End User Guide
+![Obsidian Security](images/obsidian-header.png)
 
-The ObSec Codex plugin gives Codex guided workflows for inspecting SaaS security
-posture and synchronizing the results with Obsidian Security.
+The Obsidian Security Codex Plugin provides guided workflows for inspecting
+SaaS security posture and synchronizing the results with Obsidian Security.
 
-## Prerequisites
+## Install and connect
 
-- The ChatGPT desktop app with Codex and Plugins access.
-- The Codex in-app Browser plugin enabled.
-- Node.js 22 or newer available on `PATH`, or the Node.js runtime bundled with
-  Codex.
-- An Obsidian API server URL and API token.
+Follow the [installation guide](https://github.com/Obsidian-Security-Labs/obsec-codex-plugin#installation) to install the
+plugin, configure your Obsidian Security API connection, enable the in-app
+Browser, and verify the hook and MCP server. The
+[prerequisites](https://github.com/Obsidian-Security-Labs/obsec-codex-plugin#prerequisites) list the required host, runtime,
+and account access.
 
-## Install the plugin
-
-Add the marketplace from a terminal:
-
-```bash
-codex plugin marketplace add \
-  https://gitlab.com/obsec1/dataplatform/bastion-codex-public.git
-```
-
-Restart the ChatGPT desktop app. Open **Plugins**, choose **Obsidian Security
-Plugins**, and install **Obsidian Security**. Start a new Codex task after an
-install or upgrade.
-
-## Connect to Obsidian Security
-
-Set `OBSIDIAN_API_SERVER` and `OBSIDIAN_API_TOKEN` in the environment that
-starts Codex. Keep the token out of prompts and shell commands. Exclude it from
-Codex's shell environment in `~/.codex/config.toml`:
-
-```toml
-[shell_environment_policy]
-exclude = ["OBSIDIAN_API_TOKEN"]
-```
-
-In a new task, open `/hooks` and trust the installed ObSec hook, then open `/mcp`
-and confirm that the required `obsec` server initialized.
+Start a new Codex task after installing or updating the plugin.
 
 ## Choose and configure a model
 
 The plugin uses whichever model is selected in Codex; there is no separate
-model configuration for ObSec. Select a model before starting the inspection.
+model configuration for the plugin. Select a model before starting the inspection.
 The workflow reads live page snapshots from the Codex in-app Browser and does
 not require image uploads.
 
-Available models may depend on local or organizational policy.
+Available models and menu labels may vary by Codex version and organizational
+policy. Screenshots in this guide illustrate the controls; they do not specify
+a required model.
 
-![](images/codex-model-selector.png){ width=82% }
-
-\newpage
+![Codex model selection menu](images/codex-model-selector.png)
 
 ## Configure your permission settings
 
@@ -59,22 +34,21 @@ Use the permissions control below the composer to choose how Codex handles
 actions that need access beyond the current workspace. For most inspections,
 start with **Ask for approval**.
 
-![](images/codex-permission-settings.png){ width=82% }
+![Codex approval settings](images/codex-permission-settings.png)
 
 - **Ask for approval** - Codex works within the allowed workspace, while the
   guarded Browser workflow verifies the target and asks you to approve every
-  click or other Browser change before it runs. Codex also pauses before editing
-  external files or using the internet.
+  guarded Browser action before it runs. Other access requests follow your
+  Codex configuration and organizational policy.
 - **Approve for me** - Codex keeps the same workspace boundary, while the
   guarded Browser workflow still verifies and submits each Browser action
   separately. Eligible actions go to an automatic reviewer; anything that
-  cannot be approved safely returns to you.
+  is denied is reported for your attention. Automatic review can make incorrect
+  decisions; see the [review guidance](auto-review-policy.md).
 - **Full Access** - Codex runs without local sandbox restrictions or approval
   prompts and can access the internet and files outside the workspace. Use it
   only when that broad access is intentional. Browser action requests pass
-  automatically without asking you.
-
-\newpage
+  without prompting, while the plugin retains policy and receipt checks.
 
 ## Review a guarded Browser action
 
@@ -83,14 +57,12 @@ guarded Browser action runs. The request shows the proposed action, target,
 host, and Browser tab. Compare these details with the visible application
 before choosing **Allow once** or **Deny**.
 
-![](images/guarded-browser-approval.png){ width=80% }
+![Guarded Browser approval in a test Slack account](images/guarded-browser-approval.png)
 
-In this example, the request proposes a `click` on the target named `Admin`.
-The Browser cursor on the right, boxed in red, shows the exact UI control that
-is awaiting permission. Confirm that the cursor, target name, and host all match
-the intended action.
-
-\newpage
+In this test Slack account, the request proposes clicking **Admin**. Confirm that the
+Browser pointer is on the intended Admin control and that the host is the
+application you asked to inspect. Deny the request if these details do not
+match.
 
 ## How to use Codex Password Manager
 
@@ -100,29 +72,25 @@ logins. To open the password manager:
 1. Open the three-dot menu in the upper-right corner of the Browser.
 2. Select **Passwords and autofill**, then **Password manager**.
 
-![](images/codex-password-manager-menu.png){ width=54% }
+![Browser password manager menu](images/codex-password-manager-menu.png)
 
-The same options are available under **Settings** > **Browser**. The Browser
-menu also provides an option to import cookies and passwords from another
-browser.
-
-\newpage
+Follow your organization's policy for saving or importing credentials. Menu
+labels may differ in your Codex version.
 
 ### Save a password on your next login
 
 In **Password manager**, open **Advanced** and turn on **Offer to save passwords
 and passkeys**.
 
-![](images/codex-password-manager-advanced.png){ width=82% }
+![Password manager advanced settings](images/codex-password-manager-advanced.png)
 
-The next time you log in to a SaaS application, choose **Save** when the Browser
-asks whether to save the password. The saved login will then be available for
-future inspections. Return to **Password manager** to edit or delete it.
+If your organization permits saved passwords, choose **Save** when prompted
+during sign-in. Saved logins may help with future sessions, but do not remove
+an application's MFA or other authentication requirements. Return to
+**Password manager** to edit or delete a saved login.
 
 Do not paste passwords into chat. Complete password entry, SSO, MFA, CAPTCHA,
 and other authentication steps in the visible Browser.
-
-\newpage
 
 ## First posture inspection
 
@@ -156,24 +124,26 @@ Codex summarizes the settings it found, any settings that were inaccessible or
 could not be found, and the page or section supporting each finding. A
 successful inspection is saved locally so it can be reviewed or run again.
 
-After reviewing the findings, the user can ask Codex to send the captured
-settings to the Obsidian platform.
+After reviewing the findings, ask Codex to upload the captured settings to
+Obsidian Security. Confirm the destination before approving the upload.
 
 ## Schedule recurring posture inspections
 
 After completing an inspection, you can ask Codex to run it on a recurring
 schedule and send the results to Obsidian. For example:
 
-> Grab Slack posture settings every Tuesday at 5:00 PM and send them to my
-> Obsidian platform.
+> Inspect Slack security posture every Tuesday at 5:00 PM America/Los_Angeles
+> and upload the findings to Obsidian Security.
 
 Because scheduled inspections run without you present to approve each Browser
 action, Codex will ask permission to enable unattended Browser approval for
-that specific playbook. Setting up the application's credentials in Codex
-Password Manager is encouraged so the Browser can remain signed in or reuse the
-saved login.
+that specific playbook. This opt-in retains policy and stale-target checks.
+Confirm the schedule, timezone, and upload destination before enabling it.
+Browser sign-in and your organization's credential policy still apply.
 
 After confirmation, Codex creates the schedule and reports its frequency and
 next run. If the website is signed out or requires MFA or other user input, the
 run stops and records the failure without replacing the last successful
-settings. Successful results are sent to the connected Obsidian destination.
+settings. Results are uploaded only when the playbook has an Obsidian
+connection ID.
+Confirm that connection before scheduling uploads.

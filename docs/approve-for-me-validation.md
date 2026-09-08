@@ -1,54 +1,64 @@
-# Approve for me validation
+# Validate approval behavior
 
-Run the same read-only SaaS inspection once with Ask for approval and once with
-Approve for me. Use a tenant where redirects, menus, and `target="_blank"`
-settings links are available.
+Use this guide to evaluate the Obsidian Security Codex Plugin before enabling
+**Approve for me** for your team. These are acceptance checks to run in your
+own environment, not a report of completed testing or a performance guarantee.
 
-Record for each action:
+## Prepare a test inspection
 
-- selected permission mode
-- requested host, tab ID, action, and target
-- final host, tab ID, URL, and action status
-- automatic-review decision and rationale, when present
-- error category and whether the action executed
-- approval-to-execution, target-verification, execution, and total timing
+Complete the [installation steps](../README.md#installation). Use a test SaaS
+account where you are authorized to inspect settings. Choose a workflow with
+menus and links to read-only settings pages, and use the same workflow in each
+permission mode.
 
-Verify:
+Start with **Ask for approval**, then repeat with **Approve for me**. Review the
+[automatic review guidance](auto-review-policy.md) before the second run.
 
-1. Read-only tools run without approval.
-2. Ask for approval routes writes to the user.
-3. Approve for me routes the same writes to automatic review.
-4. A redirect that completes before approval uses the final stable host.
-5. A redirect during approval fails closed with expected and actual hosts, then
-   succeeds after one fresh preparation.
-6. A non-link new-tab click returns `approval_arguments` for the blank controlled
-   replacement; the site-created tab is never claimed.
-7. A rendered same-host or explicitly approved cross-host `target="_blank"`
-   link uses `follow_link`, stays in the controlled tab, and requires no
-   replacement approval.
-8. An exact text fingerprint narrows an otherwise ambiguous CSS target before
-   the receipt is consumed.
-9. Partially covered controls use an unobscured point inside the target.
-10. Fully obscured controls remain inaccessible.
-11. `Input.dispatchMouseEvent` gets one same-tab retry and one fresh-tab retry,
-   then stops without a DOM-click fallback.
-12. Cedar denials prevent execution in every permission mode.
-13. Full access removes native review but retains Cedar and receipt checks.
-14. Browser documentation is emitted once with the direct documented call;
-    there are no length checks, assignments, slices, or proactive pages.
-15. A warm replay uses sanitized `browserEntryUrl` and reaches the authenticated
-    client with one initial approval and one receipt execution.
-16. Altering the short receipt token fails before any browser interaction.
-17. Relative and absolute forms of the same href do not trigger a stale-target
-    retry, while a changed path, query, or host still fails closed.
+## Check the expected behavior
 
-Performance targets:
+1. Read-only MCP tools run without write approval.
+2. In **Ask for approval**, guarded Browser actions and MCP writes present an
+   approval request before execution. Denying a request prevents that action.
+3. In **Approve for me**, the same guarded requests go to automatic review.
+   Navigation and clearly read-only views may proceed; application changes and
+   ambiguous clicks should be denied and reported for your attention.
+4. Approval requests identify the intended host, tab, action, and target. The
+   visible Browser pointer matches the target before an element action runs.
+5. A redirect or changed target during approval prevents the stale action from
+   executing. Codex must inspect the current page and request fresh approval.
+6. Rendered navigation links use the reviewed destination. A link that would
+   normally open a new tab can remain in the controlled tab. Other clicks that
+   open a new tab require approval for the resulting destination before Codex
+   continues in a controlled replacement tab.
+7. A fully obscured or inaccessible control is reported as unavailable. Codex
+   does not bypass the visible interface to operate it.
+8. Policy denials prevent guarded operations from executing. An expired or
+   invalid approval receipt does not authorize a Browser action.
+9. A failed or interrupted inspection reports the problem and preserves the
+   last successful settings.
 
-- warm authenticated entry: at most 30 seconds
-- cold Slack entry: at most 60 seconds
-- documentation calls per fresh Browser runtime: exactly one
-- retries on the happy path: zero
+**Full access** removes native approval prompts for guarded operations while
+retaining the plugin's policy and receipt checks. It is not required for this
+comparison.
 
-If pointer transport fails identically in both interactive modes after a fresh
-tab retry, capture a minimal Browser reproduction. That failure is outside the
-ObSec approval reviewer.
+## Record and assess the results
+
+For each run, record:
+
+- Plugin version and selected permission mode.
+- Requested action and whether it matched the intended application and target.
+- Whether the action executed, was denied, or failed.
+- The automatic review decision and explanation, when available.
+- Unexpected redirects, repeated approval requests, or inaccessible controls.
+
+Record timing if it helps compare your workflows. Completion time depends on
+application responsiveness, authentication, and the Codex environment.
+
+If an action executes after denial or targets the wrong application or control,
+stop the evaluation and contact Obsidian Security support. For other failures,
+record a minimal set of reproduction steps and the redacted error message.
+Remove credentials, personal information, and confidential application content
+from screenshots and logs before sharing them.
+
+Contact [support@obsidiansecurity.com](mailto:support@obsidiansecurity.com) with
+your findings.

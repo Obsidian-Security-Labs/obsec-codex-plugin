@@ -28,7 +28,7 @@ Confirm the requested local time, frequency, and timezone. Default to daily at
 Maintain one recurring automation per playbook unless the user explicitly asks
 for multiple schedules. Its prompt must:
 
-- name the `bastion-codex-plugin` plugin and `replay-posture` skill
+- name the `obsec-codex-plugin` plugin and `replay-posture` skill
 - include the playbook slug and absolute playbook path
 - require the Codex in-app Browser plus ObSec's browser approval tool
 - preserve the prior successful settings if authentication or inspection fails
