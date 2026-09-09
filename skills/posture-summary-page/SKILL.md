@@ -27,6 +27,13 @@ Include:
 - chronological run history with failures and errors
 - an explicit empty state for sections with no data
 
+For `uploadMode: "native"`, show bundle/source identity and separate observed
+and unavailable counts. Group canonical rows by contract category and match
+changes by `setting` ID. Display `NO_DATA` reasons separately from observed
+values; absence is not false, zero, or a security verdict. Show API acceptance
+and downstream processing evidence or unverified status as separate facts.
+Failed runs must leave the last successful baseline visible.
+
 HTML-escape every value read from the playbook. When embedding serialized JSON,
 escape `<` so playbook content cannot terminate a script element. Do not render
 secrets, tokens, cookies, raw page content, or screenshots.

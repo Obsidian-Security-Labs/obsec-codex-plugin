@@ -1,6 +1,6 @@
 {
   "name": "obsec-codex-plugin",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Inspect SaaS security posture in Codex and sync findings to Obsidian.",
   "license": "MIT",
   "author": {

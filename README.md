@@ -9,6 +9,7 @@ You can ask Codex to:
 
 - Inspect a SaaS application's security settings.
 - Upload collected posture findings to Obsidian Security.
+- Select an existing native SaaS connection and upload its settings.
 - Summarize posture scores and review changes over time.
 - Create reusable inspection playbooks and schedule posture workflows.
 
@@ -40,12 +41,12 @@ Run these commands in a terminal:
 ```bash
 codex plugin marketplace add \
   https://github.com/Obsidian-Security-Labs/obsec-codex-plugin.git
-codex plugin add obsec-codex-plugin@bastion-codex
+codex plugin add obsec-codex-plugin@obsidian-security
 codex plugin list --json
 ```
 
 In the final command's output, confirm that
-`obsec-codex-plugin@bastion-codex` appears under `installed` with both
+`obsec-codex-plugin@obsidian-security` appears under `installed` with both
 `installed` and `enabled` set to `true`.
 
 The command uses the plugin's package identifier. In the plugin directory, the
@@ -143,13 +144,52 @@ still apply. Review a playbook before enabling unattended changes.
 
 For more detail, see the [approval policy guide](docs/auto-review-policy.md).
 
+## SaaS guidance and native connections
+
+Before inspecting an identified SaaS, the plugin resolves authenticated guidance
+through Bastion Relay using the Codex host's existing Obsidian API credentials.
+The configured API environment selects the Relay: `*.obsec.io` uses
+`bastion-relay.obsec.io`, and `*.dev.obsec.us` uses
+`bastion-relay.dev.obsec.us`. Other environments need an approved Relay mapping
+before authenticated guidance is available. No additional login file or local
+package installation is required.
+
+The `native-saas-settings` skill selects a current native connection and verifies
+that its tenant matches the authenticated browser session. When several tenants
+exist, Codex asks which one to use. Native settings preserve the playbook's exact
+setting IDs, categories, types, and unavailable-data statuses, then publish
+directly through the native upload MCP tool without a separate commit.
+
+Relay version-3 bundles can include a validated posture contract. The plugin
+holds that contract in its MCP process and prepares canonical rows from observed
+values and evidence. Preparation requires every contract setting exactly once
+and returns counts plus a review digest tied to the destination. Upload repeats
+validation and rejects changed inputs or a destination on another platform.
+Any platform whose current Relay skill includes a contract requires this
+contract path; unchecked rows for that platform are rejected. If a service's
+contract is explicitly null, inspection can continue without contract
+validation. Other native services may use their existing row format
+when the guidance supplies complete metadata; missing mappings stay local. An
+explicit unsupported-service result uses the custom connector workflow; resolver
+or authentication errors do not cause an automatic switch to custom ingestion.
+Remote guidance
+cannot weaken the plugin's browser, credential, or approval controls.
+
+Native contract snapshots can be saved and replayed with their bundle identity
+and observed/unavailable counts. Each replay resolves the current bundle and
+compares the playbook version, contract source, and platform before browsing.
+Changes require interactive review, and failures preserve the previous baseline.
+Contract references are scoped to the current MCP process and credentials; a
+restart requires fresh resolution. API acceptance is reported separately from
+verified downstream posture processing.
+
 ## Updating
 
 Refresh the marketplace and reinstall the plugin from the refreshed snapshot:
 
 ```bash
-codex plugin marketplace upgrade bastion-codex
-codex plugin add obsec-codex-plugin@bastion-codex
+codex plugin marketplace upgrade obsidian-security
+codex plugin add obsec-codex-plugin@obsidian-security
 codex plugin list --json
 ```
 

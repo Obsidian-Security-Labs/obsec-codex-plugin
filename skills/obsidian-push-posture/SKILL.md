@@ -2,8 +2,8 @@
 name: obsidian-push-posture
 license: MIT
 description: >
-  Find or create an Obsidian Security connector and connection, then upload and
-  commit normalized SaaS posture settings through the local ObSec MCP server.
+  Upload SaaS posture settings through the local ObSec MCP server, routing native
+  settings to existing connections and custom settings through upload and commit.
   Use when the user asks to upload, push, sync, or send inspected settings to
   Obsidian.
 ---
@@ -22,6 +22,30 @@ Codex applies native approval to every ObSec mutation. Read-only previews do
 not prompt. The Cedar guardrails may still deny an approved call.
 
 ## 1. Normalize settings
+
+First establish the ingestion path. For findings already associated with a
+verified custom connector, continue below. Otherwise reuse this request's
+`resolve_saas_skill` result or call `mcp__obsec__resolve_saas_skill` once with
+the service. If supported, hand the result to
+[native-saas-settings](../native-saas-settings/SKILL.md): use
+`mcp__obsec__list_native_connections` and
+`mcp__obsec__upload_native_connection_settings` for its native schema. Preserve
+`setting`, `category`, status, and harvest metadata; do not convert native rows
+to custom rows or create a custom connector. Native uploads have no commit step.
+
+For `playbook.contract`, pass the resolver's `contract_ref`, observations, and
+selected connection to `mcp__obsec__prepare_native_connection_settings`. Show
+its canonical rows and counts, then upload the same observations/reference and
+destination with `review_digest`. A native replay instead supplies
+`playbook_name` after `mcp__obsec__check_native_replay_bundle` succeeds; it must
+use a freshly resolved reference. Never submit canonical metadata as observation
+fields. The uploader resolves the destination's current Relay skill and requires
+contract preparation for every platform whose skill includes a contract, even
+when `service` is omitted. Resolver failures, missing skills, or platform
+mismatches stop upload. Report API acceptance separately from downstream processing.
+
+An explicit unsupported result permits the custom flow below. On resolution
+failure, stop ingestion and report the error; do not treat it as unsupported.
 
 Build the settings array directly in MCP tool input. Each item may contain only
 `id`, `name`, `type`, and `value`. Remove browser evidence, URLs, presentation

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Native SaaS Settings"
+  short_description: "Collect settings for native Obsidian connections"
+  default_prompt: "Use $native-saas-settings to collect and upload settings for my native SaaS connection."

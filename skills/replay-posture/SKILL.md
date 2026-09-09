@@ -10,8 +10,9 @@ description: >
 
 # Replay a posture inspection
 
-Use the Codex in-app Browser, the ObSec approval tools, and the saved
-playbook. Load `browser:control-in-app-browser` and explicitly select `iab`. On
+Load the saved playbook and complete any native bundle check before browser
+setup. Then use the Codex in-app Browser and ObSec approval tools.
+Load `browser:control-in-app-browser` and explicitly select `iab`. On
 a fresh Browser runtime, use the Browser skill's exact direct
 `nodeRepl.write(await iab.documentation())` call once. Never assign, measure,
 slice, or proactively paginate that documentation; continue only if the tool
@@ -29,6 +30,33 @@ Resolve the platform slug and read:
 
 Require a target URL and a non-empty prior settings array. Preserve unknown
 playbook fields when writing updates.
+
+### Native contract check before browsing
+
+If `uploadMode` is `native` or `bundle` is present, require a saved bundle and
+`connectionId`. Resolve the current service using
+`mcp__obsec__resolve_saas_skill` with `bundle.platform_id`. Require a supported
+version-3 response with a contract and fresh `contract_ref`. Then call
+`mcp__obsec__check_native_replay_bundle` with `contract_ref` and `playbook_name`
+(the saved slug). This reads the saved file and compares `playbook_id`,
+`playbook_version`, `source_id`, and `platform_id` in code.
+
+On failure, record `interactive review required`, preserve the prior settings,
+bundle, and successful timestamp, and stop before browsing. During unattended
+runs, do not prompt or continue with changed instructions. Browser auto-confirm
+cannot authorize a changed bundle. When the current Relay skill has a contract,
+a saved playbook that predates bundle identity also requires an interactive
+inspection instead of legacy replay.
+
+For a matching bundle, retain the newly resolved instructions and reference.
+List native connections for its service and verify the saved connection is
+still present. Confirm the browser tenant matches its `tenantValue`; stop on a
+mismatch rather than choosing a replacement. Recheck every contract setting,
+following [native-saas-settings](../native-saas-settings/SKILL.md) section 4 to
+author observations and prepare them with the saved connection ID.
+
+References from earlier runs or MCP processes are not reusable. Every new run
+must resolve and compare the current bundle before inspection.
 
 ## 2. Reinspect
 
@@ -123,7 +151,9 @@ Interactive approvals route to the user in Ask for approval mode or Codex
 automatic review in Approve for me mode. During a scheduled replay,
 include the playbook slug as `playbook_name`; the hook permits it without an
 interactive prompt only when `guardrails.autoConfirmBrowserMutations` is
-`true`.
+`true` and the action's `host` equals the hostname of the playbook's `url`. An
+action on another host still prompts; during an unattended run, record a failed
+run instead of waiting for approval.
 
 If the in-app Browser is signed out during an interactive run, ask the user to
 sign in there after finalizing the tab with `status: "handoff"`. During a
@@ -132,7 +162,10 @@ authentication.
 
 ## 3. Calculate the diff
 
-Compare by stable `id` when present, otherwise by setting name. Produce:
+For native contract runs, compare by `setting` ID, including transitions between
+observed and `NO_DATA` statuses. Keep unavailable values separate from observed
+values; do not turn them into false, zero, or a security verdict. For custom
+settings, compare by stable `id` when present, otherwise by setting name. Produce:
 
 - `added`: settings absent from the previous successful state
 - `removed`: prior settings no longer present
@@ -143,8 +176,21 @@ inaccessible result according to what the Browser shows.
 
 ## 4. Sync and record
 
-If the playbook contains `connectionId`, use `obsidian-push-posture` to upload
-and commit the new settings to that connection. If it is absent, keep the replay
+For a native contract replay, call `mcp__obsec__upload_native_connection_settings`
+with the fresh `contract_ref`, saved `connection_id`, new `observations`, and
+`playbook_name`. The tool repeats preparation and bundle/destination checks.
+An authorized replay covers fresh values under the saved bundle and destination;
+do not reuse a prior run's review digest or supply `settings`. Codex native
+write approval and Cedar still apply. There is no native commit step.
+
+Record API acceptance separately from downstream processing evidence. Update
+the successful native baseline only after preparation and upload succeed.
+Retain `uploadMode`, `bundle`, `observedCount`, `unavailableCount`, canonical
+native `settings`, and the submitted count in the playbook and run history.
+Any preparation or upload failure preserves the last successful baseline.
+
+For custom playbooks, if `connectionId` is present, use `obsidian-push-posture`
+to upload and commit the new settings to that connection. If it is absent, keep the replay
 local and say that Obsidian sync was skipped unless the user asks to find or
 create a destination.
 
