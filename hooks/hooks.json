@@ -3,7 +3,7 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "^(Bash|mcp__obsec(?:__)?[A-Za-z0-9_]+|mcp__node_repl(?:__)?js)$",
+        "matcher": "^(Bash|mcp__obsec(?:__)?[A-Za-z0-9_]+|mcp__(?:node_repl|cua_repl)(?:__)?js)$",
         "hooks": [
           {
             "type": "command",

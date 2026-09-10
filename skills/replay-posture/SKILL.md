@@ -12,11 +12,11 @@ description: >
 
 Load the saved playbook and complete any native bundle check before browser
 setup. Then use the Codex in-app Browser and ObSec approval tools.
-Load `browser:control-in-app-browser` and explicitly select `iab`. On
-a fresh Browser runtime, use the Browser skill's exact direct
-`nodeRepl.write(await iab.documentation())` call once. Never assign, measure,
-slice, or proactively paginate that documentation; continue only if the tool
-itself reports truncation. Reuse an existing binding without rereading it.
+Follow [saas-posture-inspect](../saas-posture-inspect/SKILL.md) section
+"Browser setup": prefer `mcp__cua_repl__js`, explicitly select `iab`, read the
+returned API documentation, and keep setup and receipt execution in the same
+REPL. Create its `bastionBindings` object after selecting a tab. If setup or
+receipt execution fails, stop; never fall back to direct browser mutations.
 Never use Chrome, `ab`, agent-browser, raw CDP, the Pi auth vault, or legacy
 container scripts.
 
@@ -60,10 +60,11 @@ must resolve and compare the current bundle before inspection.
 
 ## 2. Reinspect
 
-Set `globalThis.bastionBrowser = iab`. Prefer a sanitized saved
+Prefer a sanitized saved
 `browserEntryUrl`; fall back once to `url` if it no longer reaches the
-authenticated tenant. Claim that URL when it is already open; otherwise create
-a blank tab. Set `globalThis.bastionTab = tab`. Open the selected URL through
+authenticated tenant. Find it with `iab.tabs.list()` and use `iab.tabs.get(id)`
+when already open; otherwise create a blank tab with `iab.tabs.new()`. Set
+`bastionBindings.bastionTab = tab`. Open the selected URL through
 `approve_in_app_browser_action` with
 `{"action":"navigate","url":"<saved-url>"}`. Execute the returned
 `browser_call` verbatim. Never call `tab.goto()`, `tab.reload()`, `tab.back()`,
@@ -72,7 +73,7 @@ or `tab.forward()` directly.
 Recheck each previously recorded setting using the rendered tenant
 configuration. Use the prior setting name and evidence as navigation guidance,
 not as proof of the current value. After the initial page opens, navigate only
-through rendered links and buttons with the guarded visible-pointer flow. Use
+through rendered links and buttons with the guarded target-verification flow. Use
 `follow_link` for a navigation-only rendered link and include its lowercase
 `destination_host`, including for explicitly reviewed cross-host links. Do not
 use a known or guessed URL. If no visible control reaches a setting, record it
@@ -86,8 +87,8 @@ direct navigation, exact `follow_link`, and clicks clearly limited to opening a
 read-only view are eligible for automatic approval. Treat an ambiguous click as
 state-changing.
 
-Store the selected tab in `globalThis.bastionTab`. For every mutation, use its
-current `tab.id`, hostname, and latest snapshot to construct a unique
+Store the selected tab in `bastionBindings.bastionTab`. For every mutation, use
+its current `tab.id`, hostname, and latest snapshot to construct a unique
 Playwright locator. Reuse the latest snapshot if the page has not changed. In
 one `locator.evaluate()` call on the exact structured locator chain that will
 be sent for approval, return the rendered text, raw `href`, and the first
@@ -103,20 +104,23 @@ CSS as `{"kind":"css","value":"<selector>"}`, never with a `selector` field.
 
 Capture `tab.id` and `await tab.url()` twice at least 200 ms apart in the same
 preparation call. If the tab, URL, or hostname changes, rebuild the target
-before approval. Call `tab.cua.move({ x, y })` only after those checks, then call
+before approval. Only a legacy runtime that documents `tab.cua.move({ x, y })`
+uses a pointer move. Current CUA uses the verified locator and point directly;
+do not call missing legacy methods. Then call
 `approve_in_app_browser_action` with the point and exact action. Include at most
 one fingerprint: prefer live `expected_href` for links, otherwise
 `expected_text`. When navigation is the link's only required side effect, use
 `action: "follow_link"` with its exact live href and `destination_host` to avoid
 opening and replacing its `target="_blank"` tab. Make execution of the returned
 `browser_call` verbatim as the entire
-`mcp__node_repl__js` input the very next tool call, without intervening
-inspection or explanation. Observe the result once before the next mutation.
+browser REPL `code` input the very next tool call, in the same REPL as setup,
+without intervening inspection or explanation. Observe the result once before
+the next mutation.
 Every action requires its own approval; never batch mutations.
 
 A successful ordinary click should use no more than one preparation call, one
-pointer move, one approval, one immediate receipt execution, and one
-post-click observation. Retry each failure category at most once.
+available legacy pointer move, one approval, one immediate receipt execution,
+and one post-click observation. Retry each failure category at most once.
 
 For `status: "navigated"` after `follow_link`, continue in the same controlled
 tab. For `status: "same_tab"`, continue normally. For
@@ -125,7 +129,7 @@ repeat the mutation; read the current tab once without changing it and continue
 from the observed state. For
 `status: "new_tab_replacement_required"`, do not claim the site-created tab.
 The approved click code has already created a blank controlled tab in
-`globalThis.bastionTab`. Set `tab` to that binding, pass the returned
+`bastionBindings.bastionTab`. Set `tab` to that binding, pass the returned
 `approval_arguments` unchanged to `approve_in_app_browser_action`, then execute
 the returned call verbatim and verify the final URL and hostname. Never
 substitute an element `href`, guessed route, or browser history. Stop on
@@ -135,11 +139,11 @@ For `browser_host_changed` or `browser_tab_changed`, read the current controlled
 binding, wait for a stable URL, and repeat the full preparation once. Never
 claim a site-created tab.
 
-If `tab.cua.move()` fails for a verified target, reacquire the same controlled
-tab once with `iab.tabs.get(tab.id)` and repeat the full recipe. Never use
+If a documented legacy `tab.cua.move()` fails for a verified target, reacquire
+the same controlled tab once with `iab.tabs.get(tab.id)` and repeat the full recipe. Never use
 `iab.user.claimTab()` for this retry. After a second exact
 `Input.dispatchMouseEvent` timeout, assign a fresh controlled tab using
-`tab = await iab.tabs.new()` and `globalThis.bastionTab = tab`. Navigate it to
+`tab = await iab.tabs.new()` and `bastionBindings.bastionTab = tab`. Navigate it to
 the saved current URL through MCP approval and retry once from a fresh snapshot.
 Stop after any further failure.
 
@@ -205,6 +209,7 @@ the error context.
 Use `posture-summary-page` to regenerate the local report when requested.
 
 If browser work must pause for user input, make
-`iab.tabs.finalize({ keep: [{ tab, status: "handoff" }] })` the final Browser
-call of that turn. On a completed interactive replay, instead finalize with
-`status: "deliverable"`. Never use Browser tools after finalizing in that turn.
+`await tab.markHandoff()` the final Browser call of that turn. On a completed
+interactive replay, use `await tab.markDeliverable()`. Use a legacy finalization
+API only if that runtime documents it. Never use Browser tools after finalizing
+in that turn.

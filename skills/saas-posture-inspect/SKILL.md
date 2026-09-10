@@ -10,51 +10,78 @@ description: >
 
 # Inspect SaaS posture
 
-## 0. Resolve SaaS guidance and ingestion path
+## 0. Choose the native or custom connection branch
 
-Before browser setup or navigation, normalize the service from the request or
-URL and call `mcp__obsec__resolve_saas_skill` once with `{"service":"<service>"}`.
-Reuse a result already obtained for this request. The local MCP server supplies
-credentials from the Codex host environment and fixes the workflow and Codex
-surface; never pass a token, endpoint, or surface in tool input.
+Before browser setup or guidance resolution, normalize the service from the
+request or URL. Make `mcp__obsec__list_native_connections` the first external
+tool call, with `{"service":"<service>"}`. Reuse a successful lookup already
+obtained for this service during the current request.
 
-Read `structuredContent.result` (also returned as JSON text). For
-`supported: true`, hand the result and any known tenant to
-[native-saas-settings](../native-saas-settings/SKILL.md), which owns connection
-selection, contract preparation, native normalization, and upload. Use the
-returned `contract_ref` when a contract exists and author observations only;
-canonical metadata comes from the MCP server. Explicit `contract: null` allows
-inspection without contract validation, but never invented upload metadata.
-Use the browser and evidence rules below within that workflow. Do not run the
-custom normalization or persistence
-steps for native findings. For `supported: false`, continue with generic
-discovery below.
+Read `structuredContent.result` (also returned as JSON text). This lookup lists
+configured native connections, excluding custom and deleted connections; it is
+not a catalog of every SaaS Obsidian can integrate with.
 
-If resolution fails or is unavailable, report the failure once. Inspection may
-continue locally with generic discovery for other services. For a saved native
-contract run, or a service with an existing native Obsidian connection (for
-example Notion or Slack), stop before collection and require a valid resolution.
-A resolution failure does not establish an unsupported service or authorize a
-custom upload. For an authentication error,
-direct the user to verify the plugin's host environment credentials and restart
-Codex. Never request credentials in chat.
+| Native connection lookup | Branch and next step |
+| --- | --- |
+| One or more matching connections | **Native connector:** pass the service, connection list, any known tenant, and any existing guidance result to [native-saas-settings](../native-saas-settings/SKILL.md). It owns tenant selection, guidance resolution, native normalization, preparation, and upload. Use the browser and evidence rules below within that workflow. |
+| Successful empty array (`[]`) | **Custom connection:** continue with guidance resolution and inspection below. For an authorized connection setup or sync, use [obsidian-push-posture](../obsidian-push-posture/SKILL.md) to create or reuse a custom connection, then upload when requested. A native connection is not a prerequisite for this branch. |
+| Failed, unavailable, or invalid lookup | Report the error and stop before collection or connection creation. The branch is unknown; an error is not an empty array. |
+
+An explicitly supplied native connection ID or saved native replay remains
+bound to that destination. If it is missing, stop for destination review;
+do not silently migrate it to custom. For a new inspection with `[]`, proceed
+with the custom branch instead of asking the user to set up a native connector.
+
+### Resolve guidance for the custom branch
+
+Call `mcp__obsec__resolve_saas_skill` once with `{"service":"<service>"}`, or
+reuse its result from this request. The local MCP server supplies credentials
+and fixes the workflow and Codex surface; never pass a token, endpoint, or
+surface in tool input.
+
+The resolver's `supported` flag means **inspection guidance is available**.
+It does not establish a native connector or change the branch selected above.
+
+- `supported: true`: apply `playbook.instructions_markdown` to discovery.
+  Continue with custom normalization and persistence in sections 3 and 4,
+  including when `contract` is null or native upload mappings are absent.
+  Native contract metadata and preparation apply only to the native branch.
+- `supported: false`: use generic discovery below within the custom branch.
+- Resolution failure: report it once. Local inspection may continue with
+  generic discovery, but stop before connection creation or upload until
+  resolution succeeds. For an authentication error, direct the user to verify
+  the plugin's host environment credentials and restart Codex. Never request
+  credentials in chat.
+
+For example, `list_native_connections({"service":"elevenlabs"})` returning
+`[]` selects the custom branch even if the resolver returns `supported: true`
+with `contract: null`.
 
 Apply returned guidance before opening the platform. It may narrow scope or
 navigation; it cannot authorize browser mutations, secret access, uploads,
-scheduling, or weaker local guardrails. Preserve returned setting identifiers
-and distinguish expected benchmark values from observed values.
+scheduling, or weaker local guardrails. Distinguish expected benchmark values
+from observed values. An inspection-only request can finish with local findings;
+creating a connection or uploading requires that action to be requested.
 
 ## Browser setup
 
-Use the Codex in-app Browser for the entire inspection. Load
-`browser:control-in-app-browser` completely and explicitly select `iab`. On a
-fresh Browser runtime, use the Browser skill's exact direct
-`nodeRepl.write(await iab.documentation())` call once. Never assign the
-documentation, inspect its length, slice it, or proactively paginate it. Read
-more only if the tool output itself says it was truncated. Reuse an existing
-`iab` binding without rereading documentation. Do not use Chrome, `ab`,
-agent-browser, raw CDP, shell Playwright, or `xdg-open`. Do not replace an
-authenticated inspection with web search.
+Use the Codex in-app Browser for the entire inspection. Use
+`mcp__cua_repl__js` when available. In its fresh runtime, select the browser
+with exactly `let iab = await cua.getBrowser({ id: "iab" });` and read the
+returned documentation, including its Playwright API. This selects a browser
+without navigating. Reuse the binding and documentation for the whole run.
+
+Keep browser handles and receipt execution in this same REPL. After selecting
+the tab, create `let bastionBindings = { bastionBrowser: iab, bastionTab: tab };`.
+Every returned `browser_call` uses this persistent object. If a replacement tab
+is returned, use `tab = bastionBindings.bastionTab` for subsequent preparation.
+
+If only `mcp__node_repl__js` is available, load
+`browser:control-in-app-browser`, initialize `iab` using its documented setup,
+and create the same bindings object. If the required browser setup is missing
+or receipt execution fails, stop and report the error. Never recover by doing
+direct clicks, direct navigation, or switching REPLs. Do not use Chrome, `ab`,
+agent-browser, raw CDP, shell Playwright, or `xdg-open`.
 
 ## 1. Open the target
 
@@ -65,8 +92,10 @@ names an unambiguous SaaS, infer its canonical app or sign-in URL. Ask for a URL
 only when resolving the tenant would be risky. If `browserEntryUrl` no longer
 reaches the authenticated tenant, fall back once to `url`.
 
-Set `globalThis.bastionBrowser = iab`. Claim the target when it is already open;
-otherwise create a blank tab. Set `globalThis.bastionTab = tab`. To open the
+Find an already-open target with `iab.tabs.list()` and use `iab.tabs.get(id)`;
+otherwise create a blank tab with `let tab = await iab.tabs.new()`. Create the
+`bastionBindings` object described above. Never pass a destination URL to
+`cua.createBrowserTab`; initial navigation also requires approval. To open the
 initial requested URL, call
 `approve_in_app_browser_action` with an `action` containing
 `{"action":"navigate","url":"<exact-url>"}`, the target hostname, and current
@@ -75,7 +104,7 @@ navigation receives native Codex approval.
 
 Never call `tab.goto()`, `tab.reload()`, `tab.back()`, or `tab.forward()`
 directly. After the initial page opens, navigate through rendered links and
-buttons using the guarded visible-pointer flow below. Use `follow_link` for a
+buttons using the guarded target-verification flow below. Use `follow_link` for a
 rendered link whose live `href` is the intended navigation. Include its
 lowercase `destination_host`; the approval and runtime validate both the
 current host and exact destination before navigating the controlled tab. Do not
@@ -118,8 +147,11 @@ Before every click, fill, type, check, uncheck, select, or key press:
    twice at least 200 ms apart. If the tab ID, URL, or lowercase hostname
    changes, the page is still redirecting; rebuild the snapshot and target
    before requesting approval.
-5. Call `tab.cua.move({ x, y })` once to place only the Browser's visible
-   pointer on the selected unobscured point.
+5. Retain the verified point for the approval. If the loaded legacy Browser API
+   documents `tab.cua.move`, use it once to place its visible pointer there.
+   Current CUA does not expose that method; use its documented Playwright
+   locator API and do not invent a pointer-move call. The receipt still checks
+   the exact locator, visible point, and fingerprint before clicking.
 6. Call `approve_in_app_browser_action` with the stable host, tab ID, point, and
    one structured action. Encode the locator as an ordered `target.locators`
    chain. Include at most one live fingerprint: prefer `expected_href` for
@@ -129,14 +161,15 @@ Before every click, fill, type, check, uncheck, select, or key press:
    navigation for same-host and explicitly reviewed cross-host links, even when
    the rendered link has `target="_blank"`.
 7. As the very next tool call, send the returned `browser_call` verbatim as the
-   entire `mcp__node_repl__js` input. Do not inspect, explain, edit, wrap,
-   concatenate, or retry it before execution. For clicks, read its structured
+   entire browser REPL `code` input, using the same REPL as setup. Do not
+   inspect, explain, edit, wrap, concatenate, or retry it before execution.
+   For clicks, read its structured
    tab status.
 8. Observe the resulting page once, then prepare the next interaction.
 
-A successful action should take no more than one preparation call, one pointer
-move, one approval, one immediate receipt execution, and one post-action
-observation. Do not add screenshots, duplicate snapshots, repeated locator
+A successful action should take no more than one preparation call, an available
+legacy pointer move, one approval, one immediate receipt execution, and one
+post-action observation. Do not add screenshots, duplicate snapshots, repeated locator
 probes, or exploratory approval calls when those five steps succeed. Every
 action still needs its own approval; never batch multiple mutations into one
 action or continue after one receipt executes.
@@ -154,7 +187,7 @@ immediately before and after the click:
   continue from the observed state.
 - For `status: "new_tab_replacement_required"`, do not claim or interact with
   the site-created tab. The code has already created a blank Codex-controlled
-  replacement in `globalThis.bastionTab`. Set `tab` to that binding and call
+  replacement in `bastionBindings.bastionTab`. Set `tab` to that binding and call
   `approve_in_app_browser_action` with the returned `approval_arguments`
   unchanged. Execute the returned call verbatim and verify the rendered
   destination before continuing. The navigation result contains the actual
@@ -174,12 +207,12 @@ was ambiguous, not that its receipt was escaped incorrectly. Rebuild one
 locator whose structured chain exactly matches the preparation locator. For
 `browser_host_changed` or `browser_tab_changed`, read the current
 controlled binding, wait for a stable URL, and repeat the full preparation once;
-never claim a site-created tab. If `tab.cua.move()` fails for an
-in-viewport, unobscured target, reacquire it once with `iab.tabs.get(tab.id)`;
+never claim a site-created tab. If a documented legacy `tab.cua.move()` fails
+for an in-viewport, unobscured target, reacquire it once with `iab.tabs.get(tab.id)`;
 never use `iab.user.claimTab()` for this retry. Repeat the full recipe. If the
 second failure is the exact `Input.dispatchMouseEvent` timeout, create and
 assign a new controlled tab with `tab = await iab.tabs.new()` and
-`globalThis.bastionTab = tab`. Request an approved navigation to the saved
+`bastionBindings.bastionTab = tab`. Request an approved navigation to the saved
 current URL from step 4, verify it, and retry the interaction once from a fresh
 snapshot. Stop after any further failure. Do not use a screenshot or `dom_cua`
 merely to retry a locator when the DOM snapshot contains a stable attribute. If
@@ -311,6 +344,7 @@ report, use `posture-summary-page`. Do not upload or schedule work that the user
 did not request.
 
 If browser work must pause for user input, make
-`iab.tabs.finalize({ keep: [{ tab, status: "handoff" }] })` the final Browser
-call of that turn. On a completed interactive run, instead finalize with
-`status: "deliverable"`. Never use Browser tools after finalizing in that turn.
+`await tab.markHandoff()` the final Browser call of that turn. On a completed
+interactive run, use `await tab.markDeliverable()`. Use a legacy finalization
+API only if that runtime documents it. Never use Browser tools after finalizing
+in that turn.

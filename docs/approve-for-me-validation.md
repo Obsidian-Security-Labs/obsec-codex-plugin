@@ -23,7 +23,9 @@ Start with **Ask for approval**, then repeat with **Approve for me**. Review the
    Navigation and clearly read-only views may proceed; application changes and
    ambiguous clicks should be denied and reported for your attention.
 4. Approval requests identify the intended host, tab, action, and target. The
-   visible Browser pointer matches the target before an element action runs.
+   target's visible point and fingerprint are checked before an element action
+   runs. Legacy Browser APIs may additionally show a pointer before approval;
+   current CUA uses the verified locator without a separate pointer-move API.
 5. A redirect or changed target during approval prevents the stale action from
    executing. Codex must inspect the current page and request fresh approval.
 6. Rendered navigation links use the reviewed destination. A link that would
@@ -40,6 +42,27 @@ Start with **Ask for approval**, then repeat with **Approve for me**. Review the
 **Full access** removes native approval prompts for guarded operations while
 retaining the plugin's policy and receipt checks. It is not required for this
 comparison.
+
+### Regression checks after updating the browser runtime
+
+- Review and trust the current ObSec hook after installing the updated plugin,
+  including when its marketplace or plugin name changed. Start a fresh task
+  so the new skill instructions and MCP runtime are loaded together.
+- Confirm the inspection uses `cua_repl` when available, with browser setup and
+  receipt execution in the same REPL. There must be one ObSec approval-tool
+  call before each navigation or click, even for read-only settings views.
+- In **Ask for approval**, approve the first click and deny the second. Verify
+  the second action does not execute. Repeat with a fresh approval request;
+  prior receipts must never authorize later clicks.
+- A missing `process` global, missing legacy `tab.cua.move`, or missing
+  `browser.user.openTabs` must not trigger direct-click fallback. Updated
+  receipt execution uses the supported browser APIs and works without `process`.
+- Run the same interaction in **Approve for me** and **Full access** to verify
+  native approval routing changes while receipt and target checks stay active.
+
+Unit tests and a live browser-executor smoke test do not establish that the
+native approval dialog appeared. Record the selected app mode and the actual
+approval/denial result separately when completing these acceptance checks.
 
 ## Record and assess the results
 

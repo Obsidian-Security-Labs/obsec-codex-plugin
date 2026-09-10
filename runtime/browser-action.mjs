@@ -3,27 +3,33 @@
 // src/mcp/browser-approval-store.ts
 import { createHash, randomUUID } from "node:crypto";
 import { chmod, lstat, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { homedir, platform, tmpdir, userInfo } from "node:os";
 import { resolve } from "node:path";
 var SAFE_ID = /^[A-Za-z0-9-]+$/u;
 function safeId(value, name) {
   if (!SAFE_ID.test(value)) throw new Error(`${name} is invalid`);
   return value;
 }
-function approvalRoot() {
-  return process.env.OBSEC_BROWSER_APPROVALS_PATH ?? resolve(process.env.HOME ?? homedir(), ".obsec/browser-approvals");
+function approvalOwnerKey() {
+  return createHash("sha256").update(homedir()).digest("hex").slice(0, 12);
+}
+function browserApprovalRoot() {
+  const runtimeProcess = Reflect.get(globalThis, "process");
+  const configured = runtimeProcess?.env?.OBSEC_BROWSER_APPROVALS_PATH;
+  if (configured) return resolve(configured);
+  return resolve(tmpdir(), `obsec-browser-approvals-${approvalOwnerKey()}`);
 }
 async function ensurePrivateDirectory(path) {
   await mkdir(path, { mode: 448, recursive: true });
   const stats = await lstat(path);
-  const uid = process.getuid?.();
+  const uid = userInfo().uid;
   if (!stats.isDirectory() || stats.isSymbolicLink()) {
     throw new Error(`browser_approval_directory_insecure: ${path} is not a directory`);
   }
-  if (uid !== void 0 && stats.uid !== uid) {
+  if (uid >= 0 && stats.uid !== uid) {
     throw new Error(`browser_approval_directory_insecure: ${path} has the wrong owner`);
   }
-  if (process.platform !== "win32" && (stats.mode & 63) !== 0) {
+  if (platform() !== "win32" && (stats.mode & 63) !== 0) {
     await chmod(path, 448);
   }
 }
@@ -87,7 +93,7 @@ var FileBrowserApprovalStore = class {
   }
 };
 function createBrowserApprovalStore() {
-  return new FileBrowserApprovalStore(approvalRoot());
+  return new FileBrowserApprovalStore(browserApprovalRoot());
 }
 
 // src/mcp/browser-action.ts
@@ -183,7 +189,13 @@ var LOCATOR_ACTIONS = {
 };
 async function performAction(tab, locator, action) {
   if (action.action === "click") {
-    await tab.cua.click(action.point);
+    if (tab.cua) {
+      await tab.cua.click(action.point);
+    } else if (locator.click) {
+      await locator.click({});
+    } else {
+      throw new Error("browser_click_api_unavailable");
+    }
     return;
   }
   if (action.action === "follow_link") {
@@ -193,6 +205,11 @@ async function performAction(tab, locator, action) {
 }
 function tabKey(tab) {
   return tab.providerTabId ? `provider:${tab.providerTabId}` : `user:${tab.id}`;
+}
+async function openTabs(browser) {
+  if (browser.tabs.list) return browser.tabs.list();
+  if (browser.user) return browser.user.openTabs();
+  throw new Error("browser_tab_listing_unavailable");
 }
 function httpUrl(value) {
   if (!value || !URL.canParse(value)) return void 0;
@@ -246,7 +263,7 @@ async function findNewTab(browser, knownTabs) {
   let newTabs = [];
   for (let attempt = 0; attempt < 2 && newTabs.length === 0; attempt += 1) {
     await new Promise((resolve2) => setTimeout(resolve2, 100));
-    newTabs = (await browser.user.openTabs()).filter((tab) => !knownTabs.has(tabKey(tab)));
+    newTabs = (await openTabs(browser)).filter((tab) => !knownTabs.has(tabKey(tab)));
   }
   if (newTabs.length > 1) throw new Error("new_tabs_ambiguous");
   return newTabs[0];
@@ -255,7 +272,7 @@ async function stableNewTabUrl(browser, tab) {
   const key = tabKey(tab);
   let previous;
   for (let attempt = 0; attempt < 10; attempt += 1) {
-    const current = (await browser.user.openTabs()).find((candidate) => tabKey(candidate) === key);
+    const current = (await openTabs(browser)).find((candidate) => tabKey(candidate) === key);
     const url = httpUrl(current?.url);
     if (url && url === previous) return url;
     previous = url;
@@ -359,7 +376,7 @@ async function runTargetAction(globals, browser, tab, approved, timing) {
     return withTimings(result2, timing, verificationMs, executionStartedAt);
   }
   const trackTabs = ["click", "dblclick"].includes(approved.action.action);
-  const knownTabs = trackTabs ? new Set((await browser.user.openTabs()).map((item) => tabKey(item))) : void 0;
+  const knownTabs = trackTabs ? new Set((await openTabs(browser)).map((item) => tabKey(item))) : void 0;
   await performAction(tab, locator, approved.action);
   const result = await clickResult(globals, browser, tab, knownTabs, normalizedCurrentUrl);
   return withTimings(result, timing, verificationMs, executionStartedAt);

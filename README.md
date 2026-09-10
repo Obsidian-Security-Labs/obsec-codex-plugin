@@ -58,18 +58,48 @@ For general plugin management, see the
 
 ### 2. Connect to Obsidian Security
 
+#### 2.1 Create an API token
+
+In your Obsidian tenant create an API that the plugin can use to authenticate
+to your Obsidian tenant.
+
+#### 2.2 Find your Obsidian tenant API region
+
+Obsidian has multiple regions:
+
+- obsec.io
+- obsec.eu
+- dm.obsec.io
+- dc.obsec.io
+- sy.obsec.io
+
+You need to select the region that matches your deployed instance. For instance, if your Obsidian instance
+is at `https://acme.obsec.io/` then your API server is `https://api.obsec.io`. If your instance was at
+`https://emca.sy.obsec.io/` then your API server is `https://api.sy.obsec.io`.
+
+#### 2.3 Setup your codex env file
+
 Set these variables in the environment that launches your Codex desktop app,
 using your organization's approved secret-management process:
 
-| Variable | Value |
-| --- | --- |
+| Variable              | Value                                                |
+| --------------------- | ---------------------------------------------------- |
 | `OBSIDIAN_API_SERVER` | Your organization's Obsidian Security API server URL |
-| `OBSIDIAN_API_TOKEN` | Your Obsidian Security API token |
+| `OBSIDIAN_API_TOKEN`  | Your Obsidian Security API token                     |
 
 Keep the token out of chat, command-line arguments, repository files, and Codex
 configuration files. A variable set in a terminal is not necessarily available
 to an app launched from your desktop; configure the environment used by the app
 itself.
+
+If you don't already have the file create `~/.codex/.env` and place the variables there.
+
+```bash
+export OBSIDIAN_API_TOKEN="YOUR API TOKEN HERE"
+export OBSIDIAN_API_SERVER="https://api.obsec.io"
+```
+
+#### 2.4 Block token from shell commands
 
 In your Codex configuration file (`~/.codex/config.toml` by default, or
 `$CODEX_HOME/config.toml` if you use a custom Codex home), exclude the token from
@@ -143,45 +173,6 @@ Scheduled Browser changes require explicit opt-in through the playbook setting
 still apply. Review a playbook before enabling unattended changes.
 
 For more detail, see the [approval policy guide](docs/auto-review-policy.md).
-
-## SaaS guidance and native connections
-
-Before inspecting an identified SaaS, the plugin resolves authenticated guidance
-through Bastion Relay using the Codex host's existing Obsidian API credentials.
-The configured API environment selects the Relay: `*.obsec.io` uses
-`bastion-relay.obsec.io`, and `*.dev.obsec.us` uses
-`bastion-relay.dev.obsec.us`. Other environments need an approved Relay mapping
-before authenticated guidance is available. No additional login file or local
-package installation is required.
-
-The `native-saas-settings` skill selects a current native connection and verifies
-that its tenant matches the authenticated browser session. When several tenants
-exist, Codex asks which one to use. Native settings preserve the playbook's exact
-setting IDs, categories, types, and unavailable-data statuses, then publish
-directly through the native upload MCP tool without a separate commit.
-
-Relay version-3 bundles can include a validated posture contract. The plugin
-holds that contract in its MCP process and prepares canonical rows from observed
-values and evidence. Preparation requires every contract setting exactly once
-and returns counts plus a review digest tied to the destination. Upload repeats
-validation and rejects changed inputs or a destination on another platform.
-Any platform whose current Relay skill includes a contract requires this
-contract path; unchecked rows for that platform are rejected. If a service's
-contract is explicitly null, inspection can continue without contract
-validation. Other native services may use their existing row format
-when the guidance supplies complete metadata; missing mappings stay local. An
-explicit unsupported-service result uses the custom connector workflow; resolver
-or authentication errors do not cause an automatic switch to custom ingestion.
-Remote guidance
-cannot weaken the plugin's browser, credential, or approval controls.
-
-Native contract snapshots can be saved and replayed with their bundle identity
-and observed/unavailable counts. Each replay resolves the current bundle and
-compares the playbook version, contract source, and platform before browsing.
-Changes require interactive review, and failures preserve the previous baseline.
-Contract references are scoped to the current MCP process and credentials; a
-restart requires fresh resolution. API acceptance is reported separately from
-verified downstream posture processing.
 
 ## Updating
 

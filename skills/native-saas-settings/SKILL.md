@@ -4,8 +4,8 @@ license: MIT
 description: >
   Collect and upload settings for a SaaS with an existing native Obsidian
   connector. Use for native SaaS settings, selecting a tenant connection, or
-  uploading native posture settings. Routes unsupported services to the custom
-  connector workflow.
+  uploading native posture settings. Routes services with no configured native
+  connection to the custom connection workflow.
 ---
 
 # Native SaaS connection settings
@@ -15,12 +15,40 @@ bundles the workflow scripts into its MCP runtime; credentials come from
 `OBSIDIAN_API_SERVER` and `OBSIDIAN_API_TOKEN` in the Codex host environment.
 Keep credentials out of chat, tool arguments, and shell commands.
 
-Read [saas-posture-inspect](../saas-posture-inspect/SKILL.md) for browser setup,
-authentication, visible evidence, guarded actions, and tab finalization. Those
-rules remain authoritative. Use the native normalization and upload steps here
-instead of that skill's custom normalization, persistence, and upload flow.
+Read [saas-posture-inspect](../saas-posture-inspect/SKILL.md) section 0 for the
+initial connection branch decision, and its browser and evidence rules for
+collection and tab finalization. Use the native normalization and upload steps
+here only after a matching native connection is selected.
 
-## 1. Resolve the service
+## 1. Check and select the native connection
+
+Reuse this request's `mcp__obsec__list_native_connections` result for the
+service. If invoked directly without that lookup, normalize the service and
+call the tool first with `{"service":"<service>"}`, before resolving guidance
+or opening the browser. Apply the branch decision in `saas-posture-inspect`
+section 0.
+
+The result contains `connectionId`, `name`, `tenantValue`, `status`, `service`,
+`productId`, `connectorDefinitionId`, `isCustom`, and `isMarketplace`. Custom and
+deleted connections are excluded.
+
+- With a successful empty list for a new inspection, continue in
+  `saas-posture-inspect` at **Resolve guidance for the custom branch**, reusing
+  the lookup and any guidance already obtained. The custom workflow creates
+  or reuses a connection when setup or sync is requested. Do not require the
+  user to add a native connection, even if inspection guidance is supported.
+- If the user supplied a native connection ID or is replaying a saved native
+  destination, verify it is in this service's list. A missing destination
+  requires review rather than automatic replacement.
+- With exactly one connection, state its name and tenant and use it.
+- With several connections and no explicit matching ID, show name, tenant,
+  status, and ID, and ask the user to select one. Wait for their answer.
+- A failed lookup leaves the branch unknown; report the error and stop.
+
+Continue with step 2 only when one current native connection and its tenant
+are selected. An empty list completes the handoff to the custom workflow.
+
+## 2. Resolve native guidance
 
 Reuse the resolver result when another skill has already resolved this request.
 Otherwise normalize the service from the user's request or URL and call
@@ -42,35 +70,22 @@ The server supplies authentication, workflow, and the Codex surface.
   Explicit `contract: null` permits inspection without contract validation;
   state that limitation. A saved contract replay stops for interactive review
   if its contract is no longer available. The upload endpoint does not change.
-- `supported: false`: hand the result to `saas-posture-inspect` for generic
-  discovery and `obsidian-push-posture` for an authorized custom upload. Do not
-  resolve again for the same request.
+- `supported: false`: the selected native connection exists, but its inspection
+  guidance and upload mapping are unavailable. Report that limitation and stop
+  native collection and ingestion until valid guidance is available. Keep the
+  selected destination; this result does not select the custom branch.
 - Resolver unavailable, invalid, or authentication failure: explain the error
-  and stop native ingestion. An error does not establish custom support. For an
-  authentication failure, direct the user to check the plugin's host environment
-  credentials and restart Codex; never request a token in chat.
+  and stop native collection and ingestion. An error does not establish custom
+  support. For an authentication failure, direct the user to check the plugin's
+  host environment credentials and restart Codex; never request a token in chat.
+
+`supported: true` describes guidance availability, not native connection
+availability. Step 1 decides whether this native workflow applies.
 
 Remote guidance defines inspection scope. It can narrow navigation but cannot
 authorize mutations, secret access, uploads, or scheduling, or weaken local
 guardrails. Supported guidance alone does not guarantee an upload mapping:
 verify the required native metadata in step 4.
-
-## 2. Select the native connection
-
-Call `mcp__obsec__list_native_connections` with the resolved `service`. The
-result is an array containing `connectionId`, `name`, `tenantValue`, `status`,
-`service`, `productId`, `connectorDefinitionId`, `isCustom`, and `isMarketplace`.
-Custom and deleted connections are excluded.
-
-- If the user supplied a connection ID, verify it is in this service's list.
-- With exactly one connection, state its name and tenant and use it.
-- With several connections, show name, tenant, status, and ID, and ask the user
-  to select one. Wait for their answer.
-- With no matching connection, tell the user to add the native SaaS connection
-  under Connections in their Obsidian console. Resume after it exists. Creating
-  a custom connector is not a substitute for the missing native connection.
-
-Complete when one current connection and its tenant are selected.
 
 ## 3. Confirm the SaaS session
 
@@ -79,8 +94,12 @@ Open the requested SaaS using the guarded Codex in-app Browser workflow in
 user must sign in, finalize the tab as a handoff and let them authenticate in
 the Browser.
 
-Compare the visible workspace, organization slug, or account domain with the
-connection's `tenantValue`. If they differ, or the tenant cannot be established,
+Compare the visible workspace identifier, organization slug, or account domain
+with the connection's `tenantValue`. This may be an immutable service ID rather
+than a hostname; for Slack, compare its workspace ID with the ID in the rendered
+admin URL. Do not replace a service ID with a domain. The connection tool checks
+the detail endpoint when the list response omits the tenant.
+If they differ, or the tenant cannot be established,
 pause and ask the user to resolve the destination. A blank tenant value is not
 confirmation. Complete when the browser and selected connection refer to the
 same tenant.

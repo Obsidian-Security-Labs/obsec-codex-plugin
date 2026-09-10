@@ -24,17 +24,28 @@ not prompt. The Cedar guardrails may still deny an approved call.
 ## 1. Normalize settings
 
 First establish the ingestion path. For findings already associated with a
-verified custom connector, continue below. Otherwise reuse this request's
-`resolve_saas_skill` result or call `mcp__obsec__resolve_saas_skill` once with
-the service. If supported, hand the result to
-[native-saas-settings](../native-saas-settings/SKILL.md): use
-`mcp__obsec__list_native_connections` and
-`mcp__obsec__upload_native_connection_settings` for its native schema. Preserve
-`setting`, `category`, status, and harvest metadata; do not convert native rows
-to custom rows or create a custom connector. Native uploads have no commit step.
+verified custom connector, continue below. Otherwise follow
+[saas-posture-inspect](../saas-posture-inspect/SKILL.md) section 0: reuse this
+request's native connection lookup or call `mcp__obsec__list_native_connections`
+first. A matching native connection selects
+[native-saas-settings](../native-saas-settings/SKILL.md); a successful empty
+array selects the custom flow below. A failed lookup stops ingestion. Preserve
+an explicit native destination or saved native replay for review if it is
+missing, rather than replacing it with a custom connection.
 
-For `playbook.contract`, pass the resolver's `contract_ref`, observations, and
-selected connection to `mcp__obsec__prepare_native_connection_settings`. Show
+Reuse this request's guidance result or resolve once as directed by the selected
+branch. `supported: true` means guidance is available and does not change a
+custom branch to native. With `[]` and either successful resolver result, use
+the custom schema below and create or reuse the destination in step 2. Missing
+native upload metadata is not a blocker for custom settings.
+
+For the native branch, preserve `setting`, `category`, status, and harvest
+metadata; do not convert native rows to custom rows or create a custom connector.
+Native uploads have no commit step.
+
+For a native branch with `playbook.contract`, pass the resolver's `contract_ref`,
+observations, and selected connection to
+`mcp__obsec__prepare_native_connection_settings`. Show
 its canonical rows and counts, then upload the same observations/reference and
 destination with `review_digest`. A native replay instead supplies
 `playbook_name` after `mcp__obsec__check_native_replay_bundle` succeeds; it must
@@ -44,8 +55,8 @@ contract preparation for every platform whose skill includes a contract, even
 when `service` is omitted. Resolver failures, missing skills, or platform
 mismatches stop upload. Report API acceptance separately from downstream processing.
 
-An explicit unsupported result permits the custom flow below. On resolution
-failure, stop ingestion and report the error; do not treat it as unsupported.
+On resolution failure, stop ingestion and report the error; do not treat it as
+an unsupported result or a successful empty native connection lookup.
 
 Build the settings array directly in MCP tool input. Each item may contain only
 `id`, `name`, `type`, and `value`. Remove browser evidence, URLs, presentation

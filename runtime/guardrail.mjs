@@ -558,27 +558,33 @@ function classifyBashCommand(command) {
 // src/mcp/browser-approval-store.ts
 import { createHash, randomUUID } from "node:crypto";
 import { chmod, lstat, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { homedir, platform, tmpdir, userInfo } from "node:os";
 import { resolve } from "node:path";
 var SAFE_ID = /^[A-Za-z0-9-]+$/u;
 function safeId(value, name) {
   if (!SAFE_ID.test(value)) throw new Error(`${name} is invalid`);
   return value;
 }
-function approvalRoot() {
-  return process.env.OBSEC_BROWSER_APPROVALS_PATH ?? resolve(process.env.HOME ?? homedir(), ".obsec/browser-approvals");
+function approvalOwnerKey() {
+  return createHash("sha256").update(homedir()).digest("hex").slice(0, 12);
+}
+function browserApprovalRoot() {
+  const runtimeProcess = Reflect.get(globalThis, "process");
+  const configured = runtimeProcess?.env?.OBSEC_BROWSER_APPROVALS_PATH;
+  if (configured) return resolve(configured);
+  return resolve(tmpdir(), `obsec-browser-approvals-${approvalOwnerKey()}`);
 }
 async function ensurePrivateDirectory(path) {
   await mkdir(path, { mode: 448, recursive: true });
   const stats = await lstat(path);
-  const uid = process.getuid?.();
+  const uid = userInfo().uid;
   if (!stats.isDirectory() || stats.isSymbolicLink()) {
     throw new Error(`browser_approval_directory_insecure: ${path} is not a directory`);
   }
-  if (uid !== void 0 && stats.uid !== uid) {
+  if (uid >= 0 && stats.uid !== uid) {
     throw new Error(`browser_approval_directory_insecure: ${path} has the wrong owner`);
   }
-  if (process.platform !== "win32" && (stats.mode & 63) !== 0) {
+  if (platform() !== "win32" && (stats.mode & 63) !== 0) {
     await chmod(path, 448);
   }
 }
@@ -645,7 +651,7 @@ var FileBrowserApprovalStore = class {
   }
 };
 function createBrowserApprovalStore() {
-  return new FileBrowserApprovalStore(approvalRoot());
+  return new FileBrowserApprovalStore(browserApprovalRoot());
 }
 
 // src/mcp/policy.ts
@@ -4067,7 +4073,12 @@ var DIRECT_MCP_SERVER = /\b(?:mcp[\\/]launch\.sh|(?:mcp|runtime)[\\/]server\.mjs
 var RAW_OBSIDIAN_MUTATION = /\b(?:curl|http|httpie)\b[\s\S]*(?:-X\s*)?(?:POST|PUT|PATCH|DELETE)\b[\s\S]*(?:connection-management|posture|OBSIDIAN_API_SERVER)/iu;
 var MUTATION_ALLOWED_PERMISSION_MODES = /* @__PURE__ */ new Set(["default", "acceptEdits", "bypassPermissions"]);
 var APPROVAL_MARKER = /\/\* bastion-browser-approval: ([A-Za-z0-9-]+) \*\//u;
-var NODE_REPL_TOOL_NAMES = /* @__PURE__ */ new Set(["mcp__node_repl__js", "mcp__node_repljs"]);
+var BROWSER_REPL_TOOL_NAMES = /* @__PURE__ */ new Set([
+  "mcp__node_repl__js",
+  "mcp__node_repljs",
+  "mcp__cua_repl__js",
+  "mcp__cua_repljs"
+]);
 var OBSEC_TOOL_PREFIXES = ["mcp__obsec__", "mcp__obsec"];
 var BROWSER_MUTATION_METHODS = [
   "accept",
@@ -4075,6 +4086,7 @@ var BROWSER_MUTATION_METHODS = [
   "check",
   "clear",
   "click",
+  "createBrowserTab",
   "dblclick",
   "dismiss",
   "double_click",
@@ -4087,20 +4099,28 @@ var BROWSER_MUTATION_METHODS = [
   "goForward",
   "goto",
   "keypress",
+  "paste",
+  "performSecondaryAction",
   "press",
+  "pressKey",
+  "pressSequentially",
   "reload",
   "runApprovedBrowserAction",
   "selectOption",
+  "selectText",
   "setChecked",
   "setFiles",
   "setInputFiles",
+  "setValue",
   "type",
+  "typeText",
   "uncheck"
 ].join("|");
 var IN_APP_BROWSER_MUTATION = new RegExp(
   String.raw`\.(?:${BROWSER_MUTATION_METHODS})\s*\(` + String.raw`|\[\s*["'](?:${BROWSER_MUTATION_METHODS})["']\s*\]` + String.raw`|\brunApprovedBrowserAction\b|browser-action\.mjs`,
   "u"
 );
+var BLANK_CUA_TAB_CREATION = /\bcua\.createBrowserTab\(\s*(["'])iab\1\s*,\s*undefined\s*(?:,\s*\{\s*visible:\s*(?:true|false)\s*,?\s*\}\s*)?\)/gu;
 function deny(reason) {
   const message = `guardrails_blocked: ${reason}`;
   process.stdout.write(
@@ -4176,9 +4196,9 @@ function obsecToolName(toolName) {
 }
 async function inAppBrowserRequests(input) {
   const code = input.tool_input?.code;
-  if (typeof code !== "string") throw new Error("node_repl code is missing");
+  if (typeof code !== "string") throw new Error("browser REPL code is missing");
   const marker = code.match(APPROVAL_MARKER);
-  const mutation = IN_APP_BROWSER_MUTATION.test(code);
+  const mutation = IN_APP_BROWSER_MUTATION.test(code.replace(BLANK_CUA_TAB_CREATION, ""));
   if (!mutation) {
     if (marker) throw new Error("browser_approval_marker_without_mutation");
     return [];
@@ -4211,7 +4231,7 @@ async function requestsForInput(input) {
     if (typeof command !== "string") throw new Error("Bash command is missing");
     return [validateBash(command)];
   }
-  if (input.tool_name && NODE_REPL_TOOL_NAMES.has(input.tool_name)) {
+  if (input.tool_name && BROWSER_REPL_TOOL_NAMES.has(input.tool_name)) {
     return inAppBrowserRequests(input);
   }
   const name = obsecToolName(input.tool_name);
