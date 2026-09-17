@@ -132,6 +132,7 @@ Call `mcp__obsec__prepare_native_connection_settings` with inline observations:
 {
   "contract_ref": "reference-returned-by-resolver",
   "connection_id": "selected-connection-id",
+  "browser_tenant": "exact-tenant-observed-in-browser",
   "observations": [{
     "setting": "notion_ai_enabled",
     "value": true,
@@ -142,8 +143,8 @@ Call `mcp__obsec__prepare_native_connection_settings` with inline observations:
 
 The example is abbreviated; submit all contract IDs. This tool makes no network
 requests. It returns canonical `rows`, `observed`, `unavailable`, `categories`,
-`bundle`, `connectionId`, and `reviewDigest`. The digest binds the contract,
-bundle, observations, and destination. On validation failure, revisit evidence
+`bundle`, `connectionId`, `browserTenant`, and `reviewDigest`. The digest binds the contract,
+bundle, observations, browser tenant, and destination. On validation failure, revisit evidence
 and correct observations; never edit prepared rows to make them pass.
 
 Complete when every ID is observed or explicitly unavailable and preparation
@@ -191,17 +192,19 @@ For inspection-only requests, return the findings without uploading.
 
 For a contract batch, show the destination, prepared rows, and observed,
 unavailable, and category counts. Call `mcp__obsec__upload_native_connection_settings`
-with the same `contract_ref`, `connection_id`, and `observations`, plus
+with the same `contract_ref`, `connection_id`, `browser_tenant`, and `observations`, plus
 `review_digest` copied from the reviewed preparation result. Do not send
 `settings` with a contract upload. The server prepares again and rejects changed
-inputs, an unreviewed digest, or a destination on another platform. It also
+inputs, an unreviewed digest, or a destination on another platform or tenant. It also
 resolves the destination's current Relay skill; a missing skill or resolver
 failure stops the upload. Any platform whose current skill includes a contract
 requires contract preparation. If any input or destination changes, prepare and
-show the new batch for review.
+show the new batch for review. If the current Relay contract content, bundle
+identity, or contract presence changed, resolve again, prepare, and review the
+new batch before upload.
 
 For a service whose current Relay skill has `contract: null`, call the same
-upload tool with `connection_id`, `service`, and the legacy `settings` array from
+upload tool with `connection_id`, `browser_tenant`, `service`, and the legacy `settings` array from
 step 4. The server resolves the destination's skill even when `service` is omitted.
 
 Codex's native approval and Cedar policy apply to this mutation. The server
@@ -226,7 +229,7 @@ the rate limit. Never switch ingestion paths to bypass a rejection.
 For a successful contract inspection, save the usual playbook at
 `~/.obsec/playbooks/<platform-slug>.json` with `uploadMode: "native"`, the
 preparation's `bundle` object (`playbook_id`, `playbook_version`, `source_id`,
-`platform_id`), `connectionId`, tenant identity, prepared `settings`,
+`platform_id`), `connectionId`, `browserTenant`, prepared `settings`,
 `observedCount`, and `unavailableCount`. Retain the normal target URL,
 `browserEntryUrl`, timestamps, guardrail preferences, and `runs` fields from
 `saas-posture-inspect` section 4. Store durable evidence/navigation guidance

@@ -44,10 +44,10 @@ metadata; do not convert native rows to custom rows or create a custom connector
 Native uploads have no commit step.
 
 For a native branch with `playbook.contract`, pass the resolver's `contract_ref`,
-observations, and selected connection to
+observations, selected connection, and exact observed `browser_tenant` to
 `mcp__obsec__prepare_native_connection_settings`. Show
-its canonical rows and counts, then upload the same observations/reference and
-destination with `review_digest`. A native replay instead supplies
+its canonical rows and counts, then upload the same observations/reference,
+destination, and `browser_tenant` with `review_digest`. A native replay instead supplies
 `playbook_name` after `mcp__obsec__check_native_replay_bundle` succeeds; it must
 use a freshly resolved reference. Never submit canonical metadata as observation
 fields. The uploader resolves the destination's current Relay skill and requires
@@ -82,6 +82,12 @@ Example:
 ```
 
 ## 2. Resolve the destination
+
+An explicit custom `connection_id` can be passed directly to
+`mcp__obsec__upload_posture_settings`; it does not need a local registry entry.
+The server validates it in the current organization, rejects native destinations,
+and caches the verified metadata. A cached API-server mismatch stops before any
+authenticated request; select a destination in the current environment.
 
 Call `mcp__obsec__ensure_obsidian_connection` with inline JSON:
 

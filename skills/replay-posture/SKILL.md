@@ -14,9 +14,15 @@ Load the saved playbook and complete any native bundle check before browser
 setup. Then use the Codex in-app Browser and ObSec approval tools.
 Follow [saas-posture-inspect](../saas-posture-inspect/SKILL.md) section
 "Browser setup": prefer `mcp__cua_repl__js`, explicitly select `iab`, read the
-returned API documentation, and keep setup and receipt execution in the same
-REPL. Create its `bastionBindings` object after selecting a tab. If setup or
-receipt execution fails, stop; never fall back to direct browser mutations.
+returned API documentation, confirm guarded-runtime compatibility, and keep
+setup and receipt execution in the same REPL. Read
+[browser-session](../browser-session/SKILL.md) for shared API, binding, and
+selector-recovery guidance. Create the `bastionBindings` object after selecting
+a tab and complete the inspection skill's
+[binding preflight](../saas-posture-inspect/SKILL.md#verify-bindings-before-approval)
+in a separate call to the same REPL before requesting approval. If setup cannot
+be established or receipt execution fails, stop; never fall back to direct
+browser mutations.
 Never use Chrome, `ab`, agent-browser, raw CDP, the Pi auth vault, or legacy
 container scripts.
 
@@ -33,12 +39,15 @@ playbook fields when writing updates.
 
 ### Native contract check before browsing
 
-If `uploadMode` is `native` or `bundle` is present, require a saved bundle and
-`connectionId`. Resolve the current service using
+If `uploadMode` is `native` or `bundle` is present, require a saved bundle,
+`connectionId`, and non-empty `browserTenant`. An older native playbook missing
+the tenant requires one interactive refresh; do not infer or migrate it.
+Resolve the current service using
 `mcp__obsec__resolve_saas_skill` with `bundle.platform_id`. Require a supported
 version-3 response with a contract and fresh `contract_ref`. Then call
-`mcp__obsec__check_native_replay_bundle` with `contract_ref` and `playbook_name`
-(the saved slug). This reads the saved file and compares `playbook_id`,
+`mcp__obsec__check_native_replay_bundle` with `contract_ref`, `playbook_name`
+(the saved slug), and `browser_tenant` set to the saved `browserTenant`.
+This reads the saved file and compares `playbook_id`,
 `playbook_version`, `source_id`, and `platform_id` in code.
 
 On failure, record `interactive review required`, preserve the prior settings,
@@ -64,7 +73,9 @@ Prefer a sanitized saved
 `browserEntryUrl`; fall back once to `url` if it no longer reaches the
 authenticated tenant. Find it with `iab.tabs.list()` and use `iab.tabs.get(id)`
 when already open; otherwise create a blank tab with `iab.tabs.new()`. Set
-`bastionBindings.bastionTab = tab`. Open the selected URL through
+`bastionBindings.bastionTab = tab` after initializing the object at the REPL's
+top level if needed. Complete the binding preflight before opening the selected
+URL through
 `approve_in_app_browser_action` with
 `{"action":"navigate","url":"<saved-url>"}`. Execute the returned
 `browser_call` verbatim. Never call `tab.goto()`, `tab.reload()`, `tab.back()`,
@@ -87,26 +98,31 @@ direct navigation, exact `follow_link`, and clicks clearly limited to opening a
 read-only view are eligible for automatic approval. Treat an ambiguous click as
 state-changing.
 
-Store the selected tab in `bastionBindings.bastionTab`. For every mutation, use
+Store the selected tab in `bastionBindings.bastionTab`. Include the binding
+preflight in each read-only preparation call before requesting approval. For
+every mutation, use
 its current `tab.id`, hostname, and latest snapshot to construct a unique
 Playwright locator. Reuse the latest snapshot if the page has not changed. In
 one `locator.evaluate()` call on the exact structured locator chain that will
-be sent for approval, return the rendered text, raw `href`, and the first
-unobscured point among the center, edge midpoints, and inset corners. Do not use
+be sent for approval, derive geometry with `element.getBoundingClientRect()`
+and return the rendered text, raw `href`, and the first unobscured point among
+the center, edge midpoints, and inset corners. Do not use
 extra page-level filtering that is absent from the approval locator. Accept a
 point only when it is in the viewport and `document.elementFromPoint()` returns
 the target or a descendant; do not issue separate count, text, or attribute
 calls. If no usable point exists, scroll once, take one fresh snapshot, and
 rebuild it. Treat a still-obscured target as inaccessible rather than using a
-DOM click or guessed route. After a locator timeout, switch once to a stable
-`data-*`, test ID, exact `href`, or CSS locator from the fresh snapshot. Encode
-CSS as `{"kind":"css","value":"<selector>"}`, never with a `selector` field.
+DOM click or guessed route. After a locator timeout, follow the shared
+[selector recovery](../browser-session/SKILL.md#recover-from-selector-timeouts):
+verify the current tab and page before one evidence-based retry, then rebuild
+the exact structured locator chain. Do not replace a failed stable test ID with
+positional guesses. Encode CSS as `{"kind":"css","value":"<selector>"}`, never
+with a `selector` field.
 
 Capture `tab.id` and `await tab.url()` twice at least 200 ms apart in the same
 preparation call. If the tab, URL, or hostname changes, rebuild the target
-before approval. Only a legacy runtime that documents `tab.cua.move({ x, y })`
-uses a pointer move. Current CUA uses the verified locator and point directly;
-do not call missing legacy methods. Then call
+before approval. Use a pointer move only when the loaded runtime documents
+`tab.cua.move({ x, y })`; otherwise omit it. Do not call missing methods. Then call
 `approve_in_app_browser_action` with the point and exact action. Include at most
 one fingerprint: prefer live `expected_href` for links, otherwise
 `expected_text`. When navigation is the link's only required side effect, use
@@ -182,7 +198,9 @@ inaccessible result according to what the Browser shows.
 
 For a native contract replay, call `mcp__obsec__upload_native_connection_settings`
 with the fresh `contract_ref`, saved `connection_id`, new `observations`, and
-`playbook_name`. The tool repeats preparation and bundle/destination checks.
+`playbook_name`, plus the exact currently observed `browser_tenant`. The tool repeats
+preparation and bundle/destination/tenant checks. A native playbook without saved
+`browserTenant` requires one interactive refresh; do not infer or migrate it.
 An authorized replay covers fresh values under the saved bundle and destination;
 do not reuse a prior run's review digest or supply `settings`. Codex native
 write approval and Cedar still apply. There is no native commit step.

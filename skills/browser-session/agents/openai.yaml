@@ -1,0 +1,4 @@
+interface:
+  display_name: "Browser Session Reliability"
+  short_description: "Use supported browser APIs and recover from timeouts"
+  default_prompt: "Use $browser-session to diagnose this browser locator failure and recover within the current workflow."

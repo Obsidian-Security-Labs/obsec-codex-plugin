@@ -3769,34 +3769,36 @@ var TOOLS = [
   {
     name: "prepare_native_connection_settings",
     title: "Prepare Native Connection Settings",
-    description: "Prepare canonical native rows offline from observations and a server-held Relay contract. Returns rows, counts, bundle identity, destination, and a review digest. Does not upload.",
+    description: "Prepare canonical native rows offline from observations and a server-held Relay contract. Requires browser_tenant: the exact observed tenant identity. Returns rows, counts, bundle identity, destination, tenant, and a review digest. Does not upload.",
     inputSchema: objectSchema(
       {
         contract_ref: STRING,
         connection_id: STRING,
+        browser_tenant: STRING,
         observations: PostureObservationsSchema
       },
-      ["contract_ref", "connection_id", "observations"]
+      ["contract_ref", "connection_id", "browser_tenant", "observations"]
     ),
     annotations: annotations(true, false, true)
   },
   {
     name: "check_native_replay_bundle",
     title: "Check Native Replay Bundle",
-    description: "Compare a freshly resolved contract with a saved native playbook before browsing. Requires matching playbook version, source, and platform; returns the saved destination without changing the baseline.",
-    inputSchema: objectSchema({ contract_ref: STRING, playbook_name: STRING }, [
-      "contract_ref",
-      "playbook_name"
-    ]),
+    description: "Compare a freshly resolved contract with a saved native playbook. Requires matching playbook version, source, platform, and browser_tenant; returns the saved destination without changing the baseline. Before browsing, pass the saved browserTenant; upload repeats the check with the observed tenant. Older native playbooks missing browserTenant require interactive refresh.",
+    inputSchema: objectSchema(
+      { contract_ref: STRING, playbook_name: STRING, browser_tenant: STRING },
+      ["contract_ref", "playbook_name", "browser_tenant"]
+    ),
     annotations: annotations(true, false, true)
   },
   {
     name: "upload_native_connection_settings",
     title: "Upload Native Connection Settings",
-    description: "Revalidate contract observations and the reviewed digest or saved replay bundle before native upload. Resolves the destination's current Relay skill and permits legacy rows only when its contract is null. API acceptance does not prove downstream processing; no commit step.",
+    description: "Revalidate contract observations and the reviewed digest or saved replay bundle before native upload. Requires browser_tenant to match the current remote tenant exactly. Rejects contract or bundle drift; permits legacy rows only when the current contract is null. API acceptance does not prove downstream processing; no commit step.",
     inputSchema: {
       ...objectSchema({
         connection_id: STRING,
+        browser_tenant: STRING,
         service: STRING,
         settings: { type: "array", minItems: 1, items: NativeConnectionSettingSchema },
         contract_ref: STRING,
@@ -3808,20 +3810,22 @@ var TOOLS = [
         objectSchema(
           {
             connection_id: STRING,
+            browser_tenant: STRING,
             service: STRING,
             settings: { type: "array", minItems: 1, items: NativeConnectionSettingSchema }
           },
-          ["connection_id", "settings"]
+          ["connection_id", "browser_tenant", "settings"]
         ),
         ...["review_digest", "playbook_name"].map(
           (review) => objectSchema(
             {
               connection_id: STRING,
+              browser_tenant: STRING,
               contract_ref: STRING,
               observations: PostureObservationsSchema,
               [review]: STRING
             },
-            ["connection_id", "contract_ref", "observations", review]
+            ["connection_id", "browser_tenant", "contract_ref", "observations", review]
           )
         )
       ]
@@ -3878,7 +3882,7 @@ var TOOLS = [
   {
     name: "upload_posture_settings",
     title: "Upload Obsidian Posture Settings",
-    description: "Validate a connection, upload normalized settings, and commit them.",
+    description: "Custom-only: validate a current custom connection, upload normalized settings, and commit them. Send native observations to upload_native_connection_settings.",
     inputSchema: objectSchema(
       {
         ...OPTIONAL_SELECTORS,

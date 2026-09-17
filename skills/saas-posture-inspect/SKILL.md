@@ -65,23 +65,72 @@ creating a connection or uploading requires that action to be requested.
 
 ## Browser setup
 
-Use the Codex in-app Browser for the entire inspection. Use
-`mcp__cua_repl__js` when available. In its fresh runtime, select the browser
-with exactly `let iab = await cua.getBrowser({ id: "iab" });` and read the
-returned documentation, including its Playwright API. This selects a browser
-without navigating. Reuse the binding and documentation for the whole run.
+Use the Codex in-app Browser for the entire inspection. Read
+[browser-session](../browser-session/SKILL.md) for API selection, persistent
+bindings, and bounded read-only recovery. Prefer `mcp__cua_repl__js` and follow
+its current initialization instructions to select the in-app Browser without
+navigating. Read the returned browser-specific documentation. Use
+`let iab = await cua.getBrowser({ id: "iab" });` only when that entry point is
+documented; retain the selected browser as `iab`.
+
+The guarded runtime below requires a documented Playwright locator interface,
+`tab.url()`, and browser tab management. Confirm those capabilities before
+preparing an action. The legacy examples below apply only to a runtime that
+documents them. If the active interface cannot support the guarded runtime,
+report the compatibility gap; do not substitute unguarded accessibility or
+coordinate clicks.
 
 Keep browser handles and receipt execution in this same REPL. After selecting
-the tab, create `let bastionBindings = { bastionBrowser: iab, bastionTab: tab };`.
-Every returned `browser_call` uses this persistent object. If a replacement tab
-is returned, use `tab = bastionBindings.bastionTab` for subsequent preparation.
+the tab, declare the following at the REPL's top level, outside any block,
+function, or IIFE:
+
+```js
+let bastionBindings = { bastionBrowser: iab, bastionTab: tab };
+```
+
+If the binding already exists, update its fields instead of redeclaring it.
+Every returned `browser_call` uses this exact variable name. If a replacement
+tab is returned, use `tab = bastionBindings.bastionTab` for subsequent preparation.
 
 If only `mcp__node_repl__js` is available, load
 `browser:control-in-app-browser`, initialize `iab` using its documented setup,
-and create the same bindings object. If the required browser setup is missing
-or receipt execution fails, stop and report the error. Never recover by doing
-direct clicks, direct navigation, or switching REPLs. Do not use Chrome, `ab`,
+and create the same bindings object. Verify setup as described below. If it
+cannot be established or receipt execution fails, stop and report the error.
+Never recover by doing direct clicks, direct navigation, or switching REPLs.
+Do not use Chrome, `ab`,
 agent-browser, raw CDP, shell Playwright, or `xdg-open`.
+
+### Verify bindings before approval
+
+After initialization, run this read-only preflight in a **separate call to the
+same browser REPL**. It verifies that the binding persists across calls and
+refers to the selected browser and tab; a blank setup result is not proof.
+
+```js
+if (
+  typeof bastionBindings === "undefined" || !bastionBindings ||
+  typeof iab === "undefined" || !iab ||
+  typeof tab === "undefined" || !tab ||
+  bastionBindings.bastionBrowser !== iab ||
+  bastionBindings.bastionTab !== tab ||
+  typeof tab.id !== "string" || !tab.id
+) {
+  throw new Error("browser_bindings_not_ready: initialize the selected browser and tab in this REPL");
+}
+nodeRepl.write({ browserBindingsReady: true, tab_id: tab.id });
+```
+
+Require the emitted readiness result before the first approval request. If
+the binding is missing or mismatched, initialize or repair it once using the
+already selected handles in this REPL, then repeat the preflight. If the handles
+are unavailable or the check still fails, stop and identify the setup failure;
+do not describe it as a service outage or promise that a retry will resolve it.
+
+Before subsequent approvals, repeat the check within the existing read-only
+preparation call, including after a controlled-tab replacement. Use its
+`tab_id` for the approval request. This is a binding check, not a replacement
+for live target verification or approval. Do not insert setup or checks between
+an approval response and execution of its verbatim `browser_call`.
 
 ## 1. Open the target
 
@@ -92,9 +141,12 @@ names an unambiguous SaaS, infer its canonical app or sign-in URL. Ask for a URL
 only when resolving the tenant would be risky. If `browserEntryUrl` no longer
 reaches the authenticated tenant, fall back once to `url`.
 
-Find an already-open target with `iab.tabs.list()` and use `iab.tabs.get(id)`;
-otherwise create a blank tab with `let tab = await iab.tabs.new()`. Create the
-`bastionBindings` object described above. Never pass a destination URL to
+Find or create the controlled target using the active API. On a runtime that
+documents `iab.tabs`, use `iab.tabs.list()` and `iab.tabs.get(id)`, or create a
+blank tab with `let tab = await iab.tabs.new()`. Create the
+`bastionBindings` object and complete the
+[binding preflight](#verify-bindings-before-approval) described above. Never
+pass a destination URL to
 `cua.createBrowserTab`; initial navigation also requires approval. To open the
 initial requested URL, call
 `approve_in_app_browser_action` with an `action` containing
@@ -130,28 +182,31 @@ Before every click, fill, type, check, uncheck, select, or key press:
    Otherwise take one snapshot and build one unique locator.
 2. Evaluate the exact `target.locators` chain that will be sent for approval.
    Do not use page-level filtering that is absent from the structured locator.
-   In one `locator.evaluate()` call, return the rendered text, raw `href`, and
-   the first unobscured point inside the target. Test the center, edge
+   In one `locator.evaluate()` call, derive geometry with
+   `element.getBoundingClientRect()` and return the rendered text, raw `href`,
+   and the first unobscured point inside the target. Test the center, edge
    midpoints, and inset corners; a point is usable only when it is inside the
    viewport and `document.elementFromPoint()` returns the target or a
    descendant. Locator evaluation itself must resolve exactly one element, so
    do not make separate `count()`, `innerText()`, or `getAttribute()` calls.
 3. If no usable point exists, scroll once, take one fresh snapshot, and
    reevaluate. Treat a still-obscured target as inaccessible; never replace it
-   with a DOM click or guessed route. If locator evaluation times out, take one
-   fresh snapshot and switch immediately to a stable `data-*`, test ID, exact
-   `href`, or CSS locator visible in that snapshot. Do not repeat the failed
-   semantic locator. For CSS use `{"kind":"css","value":"<selector>"}`; the
-   field name is `value`, never `selector`.
+   with a DOM click or guessed route. If locator evaluation times out, follow
+   the shared [selector recovery](../browser-session/SKILL.md#recover-from-selector-timeouts):
+   verify the current tab and page before one evidence-based retry. Rebuild the
+   exact structured locator chain from fresh evidence. A failed stable test ID
+   is not a reason to switch blindly to `nth()`. For CSS use
+   `{"kind":"css","value":"<selector>"}`; the field name is `value`, never
+   `selector`.
 4. In the same read-only preparation call, capture `tab.id` and `await tab.url()`
    twice at least 200 ms apart. If the tab ID, URL, or lowercase hostname
    changes, the page is still redirecting; rebuild the snapshot and target
    before requesting approval.
-5. Retain the verified point for the approval. If the loaded legacy Browser API
+5. Retain the verified point for the approval. If the loaded Browser API
    documents `tab.cua.move`, use it once to place its visible pointer there.
-   Current CUA does not expose that method; use its documented Playwright
-   locator API and do not invent a pointer-move call. The receipt still checks
-   the exact locator, visible point, and fingerprint before clicking.
+   Otherwise omit the pointer move; do not invent a replacement call. The
+   receipt still checks the exact locator, visible point, and fingerprint
+   before clicking.
 6. Call `approve_in_app_browser_action` with the stable host, tab ID, point, and
    one structured action. Encode the locator as an ordered `target.locators`
    chain. Include at most one live fingerprint: prefer `expected_href` for

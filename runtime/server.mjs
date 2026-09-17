@@ -9115,7 +9115,7 @@ function getArg2(args, flag) {
 function defaultAuthPath2() {
   const home = homedir8();
   if (!home) {
-    throw new Error("Unable to determine home directory. Pass --auth-path <path> explicitly.");
+    throw new Error("Unable to determine the Codex host home directory for Obsidian credentials.");
   }
   return resolve8(home, ".obsec/auth.json");
 }
@@ -9157,26 +9157,26 @@ function loadAuthStore2(path, options = {}) {
   const raw = readTextFile2(
     path,
     "auth file",
-    `Auth file not found at ${path}. Run /login and select Obsidian Security.`
+    `Auth file not found at ${path}. Configure OBSIDIAN_API_TOKEN and OBSIDIAN_API_SERVER in the Codex host environment, then restart Codex.`
   );
   let parsed;
   try {
     parsed = JSON.parse(raw);
   } catch (error) {
     throw new Error(
-      `Auth file at ${path} is invalid JSON: ${requestFailureDetail(error)}. Run /login to refresh it.`
+      `Auth file at ${path} is invalid JSON: ${requestFailureDetail(error)}. Configure the Codex host's Obsidian credentials and restart Codex.`
     );
   }
   const auth = parsed;
   const creds = auth["obsidian-security"];
   if (!creds || typeof creds.access !== "string") {
     throw new Error(
-      `Auth file at ${path} is missing obsidian-security credentials. Run /login and select Obsidian Security.`
+      `Auth file at ${path} is missing obsidian-security credentials. Configure OBSIDIAN_API_TOKEN and OBSIDIAN_API_SERVER in the Codex host environment, then restart Codex.`
     );
   }
   if (options.requireOrgDomain && typeof creds.orgDomain !== "string") {
     throw new Error(
-      `Auth file at ${path} is missing obsidian-security orgDomain. Run /login and select Obsidian Security.`
+      `Auth file at ${path} is missing obsidian-security orgDomain. Configure OBSIDIAN_API_TOKEN and OBSIDIAN_API_SERVER in the Codex host environment, then restart Codex.`
     );
   }
   return {
@@ -9208,9 +9208,6 @@ function saveConnectionsStore(path, store) {
 }
 function normalizeName2(value) {
   return value.trim().toLowerCase();
-}
-function connectorMatches(connector, name, apiBase) {
-  return normalizeName2(connector.name) === normalizeName2(name) && connector.apiBase === apiBase;
 }
 function groupKey(connector) {
   return `${connector.apiBase}	${normalizeName2(connector.name)}`;
@@ -9286,30 +9283,6 @@ function repairStore(store) {
   }
   return { store: { connectors: repaired }, report };
 }
-function upsertStoredConnection(store, entry, opts) {
-  const matched = opts.merge ? store.connectors.filter((connector) => connectorMatches(connector, entry.name, entry.apiBase)) : [];
-  if (matched.length === 0) {
-    store.connectors.push({
-      connectorId: entry.connectorId,
-      name: entry.name,
-      apiBase: entry.apiBase,
-      createdAt: (/* @__PURE__ */ new Date()).toISOString(),
-      connections: [entry.connection]
-    });
-    return store;
-  }
-  let primary = matched[0];
-  for (const connector of matched) {
-    primary = preferConnector(primary, connector);
-  }
-  const kept = matched.flatMap((connector) => connector.connections ?? []).filter((connection) => connection.connectionId !== opts.dropConnectionId);
-  primary.connectorId = entry.connectorId;
-  primary.name = entry.name;
-  primary.connections = dedupeConnections([...kept, entry.connection]).connections;
-  const stale = new Set(matched.filter((connector) => connector !== primary));
-  store.connectors = store.connectors.filter((connector) => !stale.has(connector));
-  return store;
-}
 async function createRemoteConnection(apiBase, token, request) {
   const response = await apiRequest(
     `${apiBase}${CONNECTION_MANAGEMENT_PREFIX}/new`,
@@ -9330,7 +9303,18 @@ async function apiRequest(url, token, method, body) {
     "Content-Type": "application/json"
   };
   const request = method === "POST" ? { method, headers, body: body !== void 0 ? JSON.stringify(body) : void 0 } : { method, headers };
-  const res = await fetch(url, request);
+  let res;
+  try {
+    res = await fetch(url, { ...request, redirect: "error" });
+  } catch (error) {
+    const detail = requestFailureDetail(error);
+    if (method === "POST") {
+      throw new Error(
+        `Write result is unknown: ${detail}. Verify destination state before retrying.`
+      );
+    }
+    throw new Error(`Connection discovery failed: ${detail}`);
+  }
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(`HTTP ${res.status}: ${text}`);
@@ -9338,7 +9322,7 @@ async function apiRequest(url, token, method, body) {
   return await res.json();
 }
 function validationFailureMessage(resolved, operation, status, detail) {
-  const nextAction = status === 401 || status === 403 ? "Run /login and select Obsidian Security, then retry." : "Retry after confirming the API base and Obsidian connection-management service are reachable.";
+  const nextAction = status === 401 || status === 403 ? "Check the Codex host's Obsidian API credentials and organization access, restart Codex if they changed, then retry." : "Retry after confirming the API base and Obsidian connection-management service are reachable.";
   return [
     `Failed to validate Obsidian connection ${operation}.`,
     `Connector: ${resolved.connectorName}`,
@@ -9349,12 +9333,110 @@ function validationFailureMessage(resolved, operation, status, detail) {
     `Next action: ${nextAction}`
   ].join("\n");
 }
+function requiredRemoteString(connection, field, connectionId) {
+  const value = connection[field];
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error(`Remote connection ${connectionId} is missing ${field}`);
+  }
+  return value;
+}
+function parseRemoteConnection(connection, expectedId) {
+  const connectionId = requiredRemoteString(connection, "connection_id", expectedId ?? "(unknown)");
+  if (expectedId !== void 0 && connectionId !== expectedId) {
+    throw new Error(`Remote connection response returned ${connectionId}, expected ${expectedId}`);
+  }
+  if (typeof connection.is_custom !== "boolean") {
+    throw new Error(`Remote connection ${connectionId} is missing is_custom`);
+  }
+  return {
+    connectionId,
+    connectionName: requiredRemoteString(connection, "name", connectionId),
+    connectorId: requiredRemoteString(connection, "connector_definition_id", connectionId),
+    connectorName: typeof connection.service === "string" && connection.service.trim() ? connection.service : requiredRemoteString(connection, "name", connectionId),
+    tenantName: requiredRemoteString(connection, "tenant_value", connectionId),
+    status: requiredRemoteString(connection, "status", connectionId),
+    isCustom: connection.is_custom,
+    raw: connection
+  };
+}
+async function fetchRemoteConnections(apiBase, token, connectorId) {
+  const response = await apiRequest(
+    `${apiBase}${CONNECTION_MANAGEMENT_PREFIX}/connection`,
+    token,
+    "GET"
+  );
+  if (!response || !Array.isArray(response.connections)) {
+    throw new Error("Connection discovery response did not include connections[]");
+  }
+  const matches2 = [];
+  for (const candidate of response.connections) {
+    if (typeof candidate !== "object" || candidate === null || typeof candidate.is_custom !== "boolean") {
+      throw new Error("Connection discovery returned incomplete connection metadata");
+    }
+    const id = requiredRemoteString(candidate, "connection_id", "(unknown)");
+    const status = requiredRemoteString(candidate, "status", id);
+    const remoteConnectorId = requiredRemoteString(candidate, "connector_definition_id", id);
+    if (status === "deleted" || !candidate.is_custom || remoteConnectorId !== connectorId) continue;
+    let connection = candidate;
+    if (typeof connection.tenant_value !== "string" || !connection.tenant_value.trim()) {
+      const validation = await validateRemoteConnection(
+        {
+          apiBase,
+          connectorId,
+          connectorName: "",
+          connectionId: id,
+          connectionName: "",
+          tenantName: ""
+        },
+        token,
+        "before custom tenant discovery"
+      );
+      if (!validation.exists || !validation.connection) {
+        throw new Error(`Connection ${id} changed during discovery; refresh before creating.`);
+      }
+      connection = validation.connection;
+    }
+    const parsed = parseRemoteConnection(connection, id);
+    if (!parsed.isCustom || parsed.connectorId !== connectorId || parsed.status === "deleted") {
+      throw new Error(`Connection ${id} changed during discovery; refresh before creating.`);
+    }
+    matches2.push(parsed);
+  }
+  return matches2;
+}
+function cacheResolvedConnection(store, resolved) {
+  let connector = store.connectors.find(
+    (entry) => entry.apiBase === resolved.apiBase && entry.connectorId === resolved.connectorId
+  );
+  if (!connector) {
+    connector = {
+      connectorId: resolved.connectorId,
+      name: resolved.connectorName,
+      apiBase: resolved.apiBase,
+      createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+      connections: []
+    };
+    store.connectors.push(connector);
+  }
+  connector.name = resolved.connectorName;
+  const metadata = {
+    connectionId: resolved.connectionId,
+    name: resolved.connectionName,
+    tenantName: resolved.tenantName
+  };
+  const existing = connector.connections.find(
+    (entry) => entry.connectionId === resolved.connectionId
+  );
+  if (existing) Object.assign(existing, metadata);
+  else connector.connections.push(metadata);
+}
 async function validateRemoteConnection(resolved, token, operation) {
   const url = `${resolved.apiBase}${CONNECTION_MANAGEMENT_PREFIX}/connection?connection_id=${encodeURIComponent(resolved.connectionId)}`;
   let res;
   try {
     res = await fetch(url, {
       method: "GET",
+      redirect: "error",
       headers: {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json"
@@ -9383,18 +9465,22 @@ async function validateRemoteConnection(resolved, token, operation) {
   try {
     body = text ? JSON.parse(text) : {};
   } catch (error) {
-    return {
-      exists: false,
-      reason: `validation response was not valid JSON: ${requestFailureDetail(error)}`
-    };
+    throw new Error(`Connection validation returned invalid JSON: ${requestFailureDetail(error)}`);
   }
-  const connections = body.connections;
+  const connections = body?.connections;
   if (!Array.isArray(connections)) {
-    return { exists: false, reason: "validation response did not include connections[]" };
+    throw new Error("Connection validation response did not include connections[]");
   }
-  const connection = connections.find((candidate) => {
+  if (connections.some(
+    (candidate) => !candidate || typeof candidate !== "object" || typeof candidate.connection_id !== "string" || !candidate.connection_id.trim()
+  )) {
+    throw new Error("Connection validation returned incomplete connection metadata");
+  }
+  const matches2 = connections.filter((candidate) => {
     return typeof candidate === "object" && candidate !== null && candidate.connection_id === resolved.connectionId;
   });
+  if (matches2.length > 1) throw new Error("Connection validation returned duplicate identities");
+  const connection = matches2[0];
   if (!connection) {
     return {
       exists: false,
@@ -9408,7 +9494,7 @@ async function validateRemoteConnection(resolved, token, operation) {
 }
 function resolveStoredConnection(opts) {
   const store = loadConnectionsStore2(opts.connectionsPath, {
-    missingMessage: `Connections file not found at ${opts.connectionsPath}. Run create-connection.ts first or pass --connections-path.`
+    missingMessage: `Connections file not found at ${opts.connectionsPath}. Use ensure_obsidian_connection or provide an explicit connection_id to upload_posture_settings.`
   });
   if (opts.connectionId) {
     for (const connector2 of store.connectors) {
@@ -9422,14 +9508,14 @@ function resolveStoredConnection(opts) {
           connectorName: connector2.name,
           connectionId: connection.connectionId,
           connectionName: connection.name,
-          tenantName: connection.tenantName ?? connection.name
+          tenantName: connection.tenantName ?? ""
         };
       }
     }
     throw new Error(
       [
         `Connection ID ${opts.connectionId} not found in ${opts.connectionsPath}.`,
-        "Next action: run create-connection.ts or pass a connection ID already present in connections.json."
+        "Next action: pass an explicit connection_id to upload_posture_settings for remote validation."
       ].join("\n")
     );
   }
@@ -9440,7 +9526,7 @@ function resolveStoredConnection(opts) {
   if (connector.connections.length > 1) {
     const options = connector.connections.map((connection) => `${connection.name} (${connection.connectionId})`).join(", ");
     throw new Error(
-      `Connector "${connector.name}" has multiple connections. Use --connection-id to select one: ${options}`
+      `Connector "${connector.name}" has multiple connections. Use connection_id to select one: ${options}`
     );
   }
   const selected = connector.connections[0];
@@ -9450,7 +9536,7 @@ function resolveStoredConnection(opts) {
     connectorName: connector.name,
     connectionId: selected.connectionId,
     connectionName: selected.name,
-    tenantName: selected.tenantName ?? selected.name
+    tenantName: selected.tenantName ?? ""
   };
 }
 function resolveStoredConnector(connectors, connectorName) {
@@ -9466,7 +9552,7 @@ function resolveStoredConnector(connectors, connectorName) {
     return connectors[0];
   }
   const names = connectors.map((item) => item.name).join(", ");
-  throw new Error(`Multiple connectors found. Use --connector-name to select one: ${names}`);
+  throw new Error(`Multiple connectors found. Use connector_name to select one: ${names}`);
 }
 
 // src/workflows/push-posture/workflow-runtime.ts
@@ -9521,34 +9607,33 @@ function operationFailureMessage(failure) {
     `Next action: ${failure.nextAction}`
   ].join("\n");
 }
-function connectionMatches(connection, name, tenantName) {
-  if (normalizeName2(connection.name) !== normalizeName2(name)) return false;
-  if (!connection.tenantName) return true;
-  return normalizeName2(connection.tenantName) === normalizeName2(tenantName);
-}
-function findLocalConnector(store, name, apiBase) {
-  return store.connectors.find((connector) => connectorMatches(connector, name, apiBase));
-}
-function findLocalConnection(store, connectorName, apiBase, connectionName, tenantName) {
-  for (const connector of store.connectors) {
-    if (!connectorMatches(connector, connectorName, apiBase)) continue;
-    const connection = connector.connections.find((candidate) => {
-      return connectionMatches(candidate, connectionName, tenantName);
-    });
-    if (connection) return { connector, connection };
-  }
-  return void 0;
-}
 async function findRemoteConnectorByName(apiBase, token, name) {
   const resp = await apiRequest(
     `${apiBase}${CONNECTION_MANAGEMENT_PREFIX}/supported_connectors`,
     token,
     "GET"
   );
-  const connectors = Array.isArray(resp.supported_connectors) ? resp.supported_connectors : [];
-  return connectors.find((connector) => {
+  if (!resp || !Array.isArray(resp.supported_connectors)) {
+    throw new Error(
+      "Supported connector discovery response did not include supported_connectors[]"
+    );
+  }
+  if (resp.supported_connectors.some(
+    (connector) => !connector || typeof connector.id !== "string" || !connector.id.trim() || typeof connector.name !== "string" || !connector.name.trim()
+  )) {
+    throw new Error(
+      "Supported connector discovery returned incomplete metadata; refresh before creating."
+    );
+  }
+  const connectors = resp.supported_connectors.filter((connector) => {
     return typeof connector.id === "string" && typeof connector.name === "string" && connector.id.startsWith("custom-") && normalizeName2(connector.name) === normalizeName2(name);
   });
+  if (connectors.length > 1) {
+    throw new Error(
+      `Multiple remote custom connectors match ${name}: ${connectors.map(({ id }) => id).join(", ")}`
+    );
+  }
+  return connectors[0];
 }
 function isHttpUrl(value) {
   try {
@@ -9582,56 +9667,25 @@ async function resolveLogoUrl(input, reporter) {
   }
   return PLACEHOLDER_LOGO_URL;
 }
-async function findReusableConnector(store, name, apiBase, token, reporter) {
-  const localConnector = findLocalConnector(store, name, apiBase);
-  if (localConnector) {
-    reporter.log(`Reusing local connector: ${name} (${localConnector.connectorId})`);
-  }
-  try {
-    const remoteConnector = await findRemoteConnectorByName(apiBase, token, name);
-    if (remoteConnector) {
-      reporter.log(`Reusing remote connector: ${name} (${remoteConnector.id})`);
-      return { connectorId: remoteConnector.id, fromRemote: true };
-    }
-  } catch (error) {
-    if (!localConnector) {
-      throw new Error(
-        operationFailureMessage({
-          heading: "Failed to check existing Obsidian connectors before create.",
-          connectorName: name,
-          apiBase,
-          detail: requestFailureDetail(error),
-          nextAction: "retry after confirming auth/network, or pass --force-new to create anyway."
-        })
-      );
-    }
-    reporter.warn(
-      `Warning: unable to check remote connectors; using local connector ${localConnector.connectorId}: ${requestFailureDetail(error)}`
+async function findRemoteConnection(apiBase, token, connectorId, tenantName) {
+  const matches2 = (await fetchRemoteConnections(apiBase, token, connectorId)).filter(
+    (connection) => connection.tenantName === tenantName
+  );
+  if (matches2.length > 1) {
+    throw new Error(
+      [
+        `Multiple current custom connections match connector ${connectorId} and tenant ${tenantName}.`,
+        `Candidates: ${matches2.map(({ connectionId }) => connectionId).join(", ")}`,
+        "Next action: select an explicit connection ID for upload or remove the duplicate destination."
+      ].join("\n")
     );
   }
-  return { connectorId: localConnector?.connectorId, fromRemote: false };
-}
-async function reuseValidConnection(existing, connectorId, name, apiBase, token, reporter) {
-  const validation = await validateRemoteConnection(
-    {
-      apiBase,
-      connectorId: connectorId ?? existing.connector.connectorId,
-      connectorName: name,
-      connectionId: existing.connection.connectionId,
-      connectionName: existing.connection.name,
-      tenantName: existing.connection.tenantName ?? existing.connection.name
-    },
-    token,
-    "before reuse"
-  );
-  if (validation.exists) {
-    reporter.log(`Reusing existing connection: ${existing.connection.connectionId}`);
-    return existing.connection;
-  }
-  reporter.warn(
-    `Warning: local connection ${existing.connection.connectionId} is stale: ${validation.reason}`
-  );
-  return void 0;
+  const match = matches2[0];
+  return match ? {
+    connectionId: match.connectionId,
+    name: match.connectionName,
+    tenantName: match.tenantName
+  } : void 0;
 }
 async function createConnector(opts, apiBase, token, reporter) {
   const logo = await resolveLogoUrl(opts.logo, reporter);
@@ -9666,14 +9720,14 @@ async function createConnector(opts, apiBase, token, reporter) {
         connectorName: opts.name,
         apiBase,
         detail: requestFailureDetail(error),
-        nextAction: "confirm BYOD permissions and retry, or remove --force-new to reuse an existing connector."
+        nextAction: "verify whether the connector was created before retrying ensure_obsidian_connection; use force_new only for an intentional new destination."
       })
     );
   }
   reporter.log(`Connector created: ${connectorResp.connector_id}`);
   return connectorResp.connector_id;
 }
-async function createConnection(opts, apiBase, token, connectorId, staleConnectionId, reporter) {
+async function createConnection(opts, apiBase, token, connectorId, reporter) {
   reporter.log(`Creating connection: ${opts.connection}`);
   let connectionId;
   try {
@@ -9689,45 +9743,13 @@ async function createConnection(opts, apiBase, token, connectorId, staleConnecti
         heading: "Failed to create Obsidian connection.",
         connectorName: opts.name,
         apiBase,
-        connectionId: staleConnectionId,
         detail: requestFailureDetail(error),
-        nextAction: "confirm the connector exists remotely, run repair-connections.ts --write, or retry with --force-new."
+        nextAction: "verify whether the connection was created before retrying ensure_obsidian_connection; do not repeat an uncertain write blindly."
       })
     );
   }
   reporter.log(`Connection created: ${connectionId}`);
   return { connectionId, name: opts.connection, tenantName: opts.tenant };
-}
-function persistConnection(path, store, connection) {
-  try {
-    saveConnectionsStore(path, store);
-  } catch (error) {
-    throw new Error(
-      [
-        `Connection ${connection.connectionId} exists remotely but could not be saved to ${path}.`,
-        `Detail: ${requestFailureDetail(error)}`,
-        `Next action: add connection ID ${connection.connectionId} to ${path} manually before re-running; a blind re-run may create a duplicate remote connection.`
-      ].join("\n")
-    );
-  }
-}
-async function ensureConnection(opts, apiBase, token, reuse, existing, reporter) {
-  const reusable = existing ? await reuseValidConnection(existing, reuse.connectorId, opts.name, apiBase, token, reporter) : void 0;
-  if (reusable && existing) {
-    const localId = existing.connector.connectorId;
-    const connectorId2 = reuse.fromRemote ? reuse.connectorId ?? localId : localId;
-    return { connectorId: connectorId2, connection: reusable, reused: true };
-  }
-  const connectorId = reuse.connectorId || await createConnector(opts, apiBase, token, reporter);
-  const connection = await createConnection(
-    opts,
-    apiBase,
-    token,
-    connectorId,
-    existing?.connection.connectionId,
-    reporter
-  );
-  return { connectorId, connection, reused: false };
 }
 async function executeEnsureConnection(opts, reporter = SILENT_WORKFLOW_REPORTER2) {
   const auth = loadAuthStore2(opts.authPath, { requireOrgDomain: true });
@@ -9735,31 +9757,27 @@ async function executeEnsureConnection(opts, reporter = SILENT_WORKFLOW_REPORTER
   const apiBase = auth.apiServer ?? apiServerFromOrgDomain(auth.orgDomain);
   reporter.log(`API base: ${apiBase}`);
   const store = loadConnectionsStore2(opts.connectionsPath, { missingFile: "empty" });
-  const reuse = opts.forceNew ? { fromRemote: false } : await findReusableConnector(store, opts.name, apiBase, token, reporter);
-  const existing = opts.forceNew ? void 0 : findLocalConnection(store, opts.name, apiBase, opts.connection, opts.tenant);
-  if (existing && !existing.connection.tenantName) {
-    reporter.warn(
-      `Warning: stored connection ${existing.connection.connectionId} has no tenant recorded; assuming it matches tenant "${opts.tenant}" and recording it.`
+  if (!opts.tenant.trim()) throw new Error("An exact custom tenant identity is required.");
+  const remoteConnector = opts.forceNew ? void 0 : await findRemoteConnectorByName(apiBase, token, opts.name);
+  const remoteConnection = remoteConnector ? await findRemoteConnection(apiBase, token, remoteConnector.id, opts.tenant) : void 0;
+  const connectorId = remoteConnector?.id ?? await createConnector(opts, apiBase, token, reporter);
+  const connection = remoteConnection ?? await createConnection(opts, apiBase, token, connectorId, reporter);
+  const reused = remoteConnection !== void 0;
+  try {
+    cacheResolvedConnection(store, {
+      apiBase,
+      connectorId,
+      connectorName: remoteConnector?.name ?? opts.name,
+      connectionId: connection.connectionId,
+      connectionName: connection.name,
+      tenantName: connection.tenantName
+    });
+    saveConnectionsStore(opts.connectionsPath, store);
+  } catch (error) {
+    throw new Error(
+      `Connection ${connection.connectionId} exists remotely but could not be cached: ${requestFailureDetail(error)}. Use this explicit connection_id with upload_posture_settings or retry ensure_obsidian_connection without force_new.`
     );
-    existing.connection.tenantName = opts.tenant;
   }
-  const { connectorId, connection, reused } = await ensureConnection(
-    opts,
-    apiBase,
-    token,
-    reuse,
-    existing,
-    reporter
-  );
-  const updated = upsertStoredConnection(
-    store,
-    { connectorId, name: opts.name, apiBase, connection },
-    {
-      merge: !opts.forceNew,
-      dropConnectionId: reused ? void 0 : existing?.connection.connectionId
-    }
-  );
-  persistConnection(opts.connectionsPath, updated, connection);
   reporter.log(`
 Saved to ${opts.connectionsPath}`);
   reporter.log(`
@@ -9850,7 +9868,7 @@ if (isDirectScriptEntry2("repair-connections")) {
 // src/workflows/push-posture/upload-settings.ts
 import { readFileSync as readFileSync3 } from "node:fs";
 import { homedir as homedir11 } from "node:os";
-import { dirname as dirname2, extname, resolve as resolve11 } from "node:path";
+import { resolve as resolve11 } from "node:path";
 function parseArgs8() {
   const args = process.argv.slice(2);
   const settingsPath = getArg2(args, "--settings");
@@ -9867,77 +9885,60 @@ function parseArgs8() {
     connectionsPath: getArg2(args, "--connections-path") ?? resolve11(homedir11(), ".obsec/connections.json")
   };
 }
-function quoteArg(value) {
-  if (process.platform === "win32") {
-    return `"${value.replace(/"/gu, '""')}"`;
-  }
-  return `'${value.replace(/'/gu, "'\\''")}'`;
-}
-function scriptCommand(script, flags) {
-  const executable = process.execPath;
-  const currentScriptPath = process.argv[1];
-  if (!currentScriptPath) {
-    throw new Error(`Unable to construct ${script} retry command without the current script path.`);
-  }
-  const extension = extname(currentScriptPath);
-  const siblingScript = resolve11(dirname2(currentScriptPath), script.replace(/\.ts$/u, extension));
-  const parts = extension === ".ts" ? ["tsx", quoteArg(siblingScript)] : [quoteArg(executable), quoteArg(siblingScript)];
-  for (const flag of flags) {
-    if (typeof flag === "string") {
-      parts.push(flag);
-    } else {
-      parts.push(flag[0], quoteArg(flag[1]));
-    }
-  }
-  return parts.join(" ");
-}
-function replacementUploadCommand(opts, resolved) {
-  return scriptCommand("upload-settings.ts", [
-    ["--settings", opts.settingsPath],
-    ["--connection-id", resolved.connectionId],
-    ["--auth-path", opts.authPath],
-    ["--connections-path", opts.connectionsPath],
-    "--create-replacement"
-  ]);
-}
-function createConnectionCommand(opts, resolved) {
-  return scriptCommand("create-connection.ts", [
-    ["--name", resolved.connectorName],
-    ["--connection", resolved.connectionName],
-    ["--tenant", resolved.tenantName],
-    ["--auth-path", opts.authPath],
-    ["--connections-path", opts.connectionsPath]
-  ]);
-}
-function staleConnectionMessage(opts, resolved, reason) {
-  const nextAction = opts.settingsPath ? replacementUploadCommand(
-    {
-      settingsPath: opts.settingsPath,
-      authPath: opts.authPath,
-      connectionsPath: opts.connectionsPath
-    },
-    resolved
-  ) : "retry this upload with replacement creation enabled";
-  const alternateRecovery = opts.settingsPath ? createConnectionCommand(opts, resolved) : "ensure the connector and connection exist, then retry the upload";
+function staleConnectionMessage(resolved, reason) {
   return [
-    "Selected Obsidian connection is stale or missing remotely.",
-    `Connector: ${resolved.connectorName}`,
+    "Custom settings validation failed: selected connection is stale or missing remotely.",
     `Connection ID: ${resolved.connectionId}`,
     `API base: ${resolved.apiBase}`,
     `Reason: ${reason}`,
-    `Next action: ${nextAction}`,
-    `Alternate recovery: ${alternateRecovery}`
+    "Next action: use ensure_obsidian_connection to resolve a custom destination, then pass its connection_id to upload_posture_settings."
   ].join("\n");
 }
-function uploadFailureMessage(resolved, operation, detail) {
+function uploadFailureMessage(resolved, operation, error) {
+  const outcomeUnknown = !(error instanceof ObsidianAPIError);
+  const detail = error instanceof ObsidianAPIError ? `HTTP ${error.statusCode}: ${JSON.stringify(error.detail)}` : requestFailureDetail(error);
+  const stage = operation === "commit" ? "Settings upload completed, but the commit failed." : "Settings validation completed, but the upload failed.";
+  let nextAction = "Verify the destination state before retrying; do not retry the write blindly.";
+  if (!outcomeUnknown) {
+    nextAction = operation === "upload" ? "Confirm custom upload permissions and the selected destination, then retry." : "Verify the uploaded batch, then retry the custom upload-and-commit operation if needed.";
+  }
   return [
-    `Failed to ${operation} Obsidian settings data.`,
+    stage,
     `Connector: ${resolved.connectorName}`,
     `Connection ID: ${resolved.connectionId}`,
     `API base: ${resolved.apiBase}`,
     `Detail: ${detail}`,
-    "Next action: if the connection was deleted after validation, retry with --create-replacement; otherwise confirm upload permissions and retry."
+    outcomeUnknown ? `The ${operation} result is unknown because the transport failed after the request may have been sent.` : `The ${operation} was rejected by the API.`,
+    `Next action: ${nextAction}`
   ].join("\n");
+}
+function findStoredConnectionById(store, connectionId) {
+  for (const connector of store.connectors) {
+    const connection = connector.connections.find((item) => item.connectionId === connectionId);
+    if (!connection) continue;
+    return {
+      apiBase: connector.apiBase,
+      connectorId: connector.connectorId,
+      connectorName: connector.name,
+      connectionId,
+      connectionName: connection.name,
+      tenantName: connection.tenantName ?? ""
+    };
+  }
+  return void 0;
+}
+function cacheValidatedConnection(path, resolved, reporter) {
+  try {
+    const store = loadConnectionsStore2(path, { missingFile: "empty" });
+    cacheResolvedConnection(store, resolved);
+    saveConnectionsStore(path, store);
+    return true;
+  } catch (error) {
+    reporter.warn(
+      `Warning: validated connection metadata could not be cached at ${path}: ${requestFailureDetail(error)}`
+    );
+    return false;
+  }
 }
 function logValidatedConnection(connection, reporter) {
   const metadata = [
@@ -9949,15 +9950,30 @@ function logValidatedConnection(connection, reporter) {
   );
 }
 async function createReplacementConnection(resolved, token) {
-  if (!resolved.connectorId) {
+  if (!resolved.connectorId.startsWith("custom-")) {
     throw new Error(
       [
-        "Cannot create replacement connection because connectorId is missing.",
+        "Cannot create a replacement without a known custom connector ID.",
         `Connector: ${resolved.connectorName}`,
         `Connection ID: ${resolved.connectionId}`,
         `API base: ${resolved.apiBase}`,
-        "Next action: run repair-connections.ts --write or recreate the connector."
+        "Next action: use ensure_obsidian_connection to resolve a custom destination."
       ].join("\n")
+    );
+  }
+  if (!resolved.tenantName.trim()) {
+    throw new Error(
+      "Replacement tenant identity is missing; use ensure_obsidian_connection with an explicit tenant."
+    );
+  }
+  const supported = await apiRequest(
+    `${resolved.apiBase}${CONNECTION_MANAGEMENT_PREFIX}/supported_connectors`,
+    token,
+    "GET"
+  );
+  if (!supported || !Array.isArray(supported.supported_connectors) || !supported.supported_connectors.some((connector) => connector?.id === resolved.connectorId)) {
+    throw new Error(
+      "Cannot verify the replacement's custom connector; use ensure_obsidian_connection."
     );
   }
   let connectionId;
@@ -9976,7 +9992,7 @@ async function createReplacementConnection(resolved, token) {
         `Connection ID: ${resolved.connectionId}`,
         `API base: ${resolved.apiBase}`,
         `Detail: ${requestFailureDetail(error)}`,
-        "Next action: confirm the connector still exists remotely or re-run create-connection.ts."
+        "Next action: verify whether the replacement was created before retrying ensure_obsidian_connection."
       ].join("\n")
     );
   }
@@ -9985,32 +10001,6 @@ async function createReplacementConnection(resolved, token) {
     name: resolved.connectionName,
     tenantName: resolved.tenantName
   };
-}
-function persistReplacement(path, resolved, replacement, reporter) {
-  try {
-    const store = loadConnectionsStore2(path);
-    const updated = upsertStoredConnection(
-      store,
-      {
-        connectorId: resolved.connectorId,
-        name: resolved.connectorName,
-        apiBase: resolved.apiBase,
-        connection: replacement
-      },
-      { merge: true, dropConnectionId: resolved.connectionId }
-    );
-    saveConnectionsStore(path, updated);
-    return true;
-  } catch (error) {
-    reporter.warn(
-      [
-        `Warning: replacement connection was created remotely but could not be saved to ${path}: ${requestFailureDetail(error)}`,
-        `Continuing upload with connection ID ${replacement.connectionId}.`,
-        `Next action: replace connection ID ${resolved.connectionId} with ${replacement.connectionId} in ${path}, then run repair-connections.ts --write.`
-      ].join("\n")
-    );
-    return false;
-  }
 }
 function loadSettings(path) {
   let raw;
@@ -10049,37 +10039,87 @@ function resolveSettings(opts) {
   throw new Error("Provide settings or settingsPath");
 }
 async function executeUploadSettings(opts, reporter = SILENT_WORKFLOW_REPORTER2) {
-  const auth = loadAuthStore2(opts.authPath);
+  let rawSettings;
+  try {
+    rawSettings = resolveSettings(opts).map(normalizeSetting);
+    if (rawSettings.length === 0) throw new Error("At least one custom setting is required");
+  } catch (error) {
+    throw new Error(
+      `Custom settings validation failed before upload: ${requestFailureDetail(error)}`
+    );
+  }
+  const auth = loadAuthStore2(opts.authPath, { requireOrgDomain: true });
   const apiKey = auth.access;
-  let resolved = resolveStoredConnection(opts);
+  const currentApiBase = (auth.apiServer ?? apiServerFromOrgDomain(auth.orgDomain)).replace(
+    /\/+$/u,
+    ""
+  );
+  const store = loadConnectionsStore2(opts.connectionsPath, { missingFile: "empty" });
+  let resolved = opts.connectionId ? findStoredConnectionById(store, opts.connectionId) : resolveStoredConnection(opts);
+  if (resolved && resolved.apiBase.replace(/\/+$/u, "") !== currentApiBase) {
+    throw new Error(
+      [
+        "Selected cached Obsidian connection belongs to a different API server.",
+        `Connection ID: ${resolved.connectionId}`,
+        `Cached API base: ${resolved.apiBase}`,
+        `Current API base: ${currentApiBase}`,
+        "Next action: select a connection from the current Obsidian organization."
+      ].join("\n")
+    );
+  }
+  if (!resolved) {
+    resolved = {
+      apiBase: currentApiBase,
+      connectorId: "(pending validation)",
+      connectorName: "(pending validation)",
+      connectionId: opts.connectionId,
+      connectionName: opts.connectionId,
+      tenantName: "(pending validation)"
+    };
+  }
+  resolved.apiBase = currentApiBase;
   let replacementCreated = false;
   let replacementPersisted;
-  const validation = await validateRemoteConnection(resolved, apiKey, "before upload");
+  let validation = await validateRemoteConnection(resolved, apiKey, "before custom upload");
   if (!validation.exists) {
     if (!opts.createReplacement) {
-      throw new Error(staleConnectionMessage(opts, resolved, validation.reason ?? "missing"));
+      throw new Error(staleConnectionMessage(resolved, validation.reason ?? "missing"));
     }
-    reporter.warn(staleConnectionMessage(opts, resolved, validation.reason ?? "missing"));
-    reporter.log("Creating replacement connection...");
     const replacement = await createReplacementConnection(resolved, apiKey);
-    reporter.log(`Replacement connection created: ${replacement.connectionId}`);
     replacementCreated = true;
-    replacementPersisted = persistReplacement(
-      opts.connectionsPath,
+    resolved = { ...resolved, connectionId: replacement.connectionId };
+    validation = await validateRemoteConnection(
       resolved,
-      replacement,
-      reporter
+      apiKey,
+      "after explicit replacement creation"
     );
-    resolved = {
-      ...resolved,
-      connectionId: replacement.connectionId,
-      connectionName: replacement.name,
-      tenantName: replacement.tenantName ?? replacement.name
-    };
-  } else if (validation.connection) {
-    logValidatedConnection(validation.connection, reporter);
+    if (!validation.exists) {
+      throw new Error(staleConnectionMessage(resolved, validation.reason ?? "replacement missing"));
+    }
   }
-  const rawSettings = resolveSettings(opts);
+  if (!validation.connection) throw new Error("Custom destination validation returned no metadata");
+  if (validation.connection.is_custom === false) {
+    throw new Error(
+      `Connection ${resolved.connectionId} is native. Use upload_native_connection_settings for native observations.`
+    );
+  }
+  const remote = parseRemoteConnection(validation.connection, resolved.connectionId);
+  if (replacementCreated && (remote.connectorId !== resolved.connectorId || remote.tenantName !== resolved.tenantName)) {
+    throw new Error(
+      "Replacement connection identity changed; verify the destination before upload."
+    );
+  }
+  resolved = {
+    apiBase: currentApiBase,
+    connectorId: remote.connectorId,
+    connectorName: remote.connectorName,
+    connectionId: remote.connectionId,
+    connectionName: remote.connectionName,
+    tenantName: remote.tenantName
+  };
+  const cached = cacheValidatedConnection(opts.connectionsPath, resolved, reporter);
+  if (replacementCreated) replacementPersisted = cached;
+  logValidatedConnection(validation.connection, reporter);
   const client = new ObsidianSDKClient({
     apiKey,
     apiServer: resolved.apiBase
@@ -10088,15 +10128,15 @@ async function executeUploadSettings(opts, reporter = SILENT_WORKFLOW_REPORTER2)
   try {
     await client.uploadSettings({ connectionId: resolved.connectionId, settings: rawSettings });
   } catch (error) {
-    throw new Error(uploadFailureMessage(resolved, "upload", requestFailureDetail(error)));
+    throw new Error(uploadFailureMessage(resolved, "upload", error));
   }
   reporter.log(`Uploaded. Committing...`);
   try {
     await client.commitObjects({ connectionId: resolved.connectionId });
   } catch (error) {
-    throw new Error(uploadFailureMessage(resolved, "commit", requestFailureDetail(error)));
+    throw new Error(uploadFailureMessage(resolved, "commit", error));
   }
-  reporter.log("Commit complete \u2014 settings will appear in the posture UI.");
+  reporter.log("Upload and commit accepted; downstream settings processing remains unverified.");
   let postureRuleCount;
   try {
     const rules = await client.listPostureRules({ request: { limit: 1 } });
@@ -10115,6 +10155,8 @@ async function executeUploadSettings(opts, reporter = SILENT_WORKFLOW_REPORTER2)
   return {
     apiBase: resolved.apiBase,
     committed: true,
+    acceptance: "accepted",
+    processing: "unverified",
     connectionId: resolved.connectionId,
     connectionName: resolved.connectionName,
     connectorId: resolved.connectorId,
@@ -10197,6 +10239,9 @@ async function executeListNativeConnections(credentials, service) {
     })
   );
 }
+
+// src/workflows/push-posture/upload-native-connection-settings.ts
+import { isDeepStrictEqual as isDeepStrictEqual2 } from "node:util";
 
 // src/workflows/push-posture/prepare-settings.ts
 import { createHash as createHash2 } from "node:crypto";
@@ -10387,13 +10432,15 @@ function readResolvedContract(reference, credentials) {
 }
 
 // src/workflows/push-posture/prepare-settings.ts
-function executePrepareSettings(credentials, reference, connectionId, observations) {
+function executePrepareSettings(credentials, reference, connectionId, browserTenant2, observations) {
   if (!connectionId.trim())
     throw new Error("A destination connection ID is required for posture review");
+  if (!browserTenant2.trim())
+    throw new Error("The exact browser tenant identity is required for posture review");
   const { contract, bundle } = readResolvedContract(reference, credentials);
   const prepared = preparePostureSettings(contract, observations);
-  const reviewDigest = createHash2("sha256").update(JSON.stringify({ bundle, contract, observations, connectionId })).digest("hex");
-  return { ...prepared, bundle, connectionId, reviewDigest };
+  const reviewDigest = createHash2("sha256").update(JSON.stringify({ bundle, contract, observations, connectionId, browserTenant: browserTenant2 })).digest("hex");
+  return { ...prepared, bundle, connectionId, browserTenant: browserTenant2, reviewDigest };
 }
 
 // src/workflows/push-posture/check-replay-bundle.ts
@@ -10403,6 +10450,7 @@ import { resolve as resolve12 } from "node:path";
 var SavedReplaySchema = Type.Object({
   uploadMode: Type.Literal("native"),
   connectionId: Type.String({ minLength: 1 }),
+  browserTenant: Type.String({ minLength: 1 }),
   bundle: Type.Object(
     {
       playbook_id: Type.String({ minLength: 1 }),
@@ -10434,12 +10482,20 @@ function readReplay(name) {
     closeSync(fd);
   }
 }
-function executeCheckReplayBundle(credentials, reference, playbookName) {
+function executeCheckReplayBundle(credentials, reference, playbookName, browserTenant2) {
+  if (!browserTenant2.trim()) {
+    throw new Error(
+      `Native replay ${playbookName} requires interactive review: browser tenant is missing`
+    );
+  }
   const { bundle } = readResolvedContract(reference, credentials);
   try {
     const saved = assertValid(SavedReplaySchema, readReplay(playbookName), "native replay");
     assertReplayBundle(saved.bundle, bundle);
-    return { bundle, connectionId: saved.connectionId };
+    if (saved.browserTenant !== browserTenant2) {
+      throw new Error("observed browser tenant differs from the saved tenant");
+    }
+    return { bundle, connectionId: saved.connectionId, browserTenant: saved.browserTenant };
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     throw new Error(`Native replay ${playbookName} requires interactive review: ${detail}`);
@@ -10629,13 +10685,15 @@ function prepareInput(credentials, connectionId, input) {
     credentials,
     input.contractRef,
     connectionId,
+    input.browserTenant,
     input.observations
   );
   if ("playbookName" in input.review) {
     const saved = executeCheckReplayBundle(
       credentials,
       input.contractRef,
-      input.review.playbookName
+      input.review.playbookName,
+      input.browserTenant
     );
     if (saved.connectionId !== connectionId)
       throw new Error("Replay destination differs from saved connection");
@@ -10648,10 +10706,34 @@ function prepareInput(credentials, connectionId, input) {
     mode: "contract",
     rows: prepared.rows,
     service: prepared.bundle.platform_id,
-    prepared
+    prepared,
+    reviewed: readResolvedContract(input.contractRef, credentials)
   };
 }
+function assertCurrentContract(batch, resolved) {
+  if (batch.mode !== "contract") return;
+  if (!resolved.supported || !resolved.playbook || resolved.playbook.contract === null) {
+    throw new Error("Relay contract was removed; resolve, prepare, and review the batch again");
+  }
+  const current = {
+    contract: resolved.playbook.contract,
+    bundle: {
+      playbook_id: resolved.playbook.id,
+      playbook_version: resolved.playbook.version,
+      source_id: resolved.playbook.contract.source_id,
+      platform_id: resolved.playbook.contract.platform_id
+    }
+  };
+  if (!isDeepStrictEqual2(current, batch.reviewed)) {
+    throw new Error(
+      "Relay contract or bundle changed; resolve, prepare, and review the batch again"
+    );
+  }
+}
 async function executeUploadNativeConnectionSettings(credentials, connectionId, input) {
+  if (!input.browserTenant?.trim()) {
+    throw new Error("The exact browser tenant identity is required before native upload");
+  }
   const batch = prepareInput(credentials, connectionId, input);
   if (batch.rows.length === 0) throw new Error("At least one native setting is required");
   const normalized = normalizeNativeConnectionSettings(batch.rows);
@@ -10662,12 +10744,21 @@ async function executeUploadNativeConnectionSettings(credentials, connectionId, 
       `Connection ${connectionId} is not a current native connection. Run list_native_connections and select an existing native connection.`
     );
   }
+  if (!connection.tenantValue.trim()) {
+    throw new Error(`Native connection ${connectionId} has no current tenant identity`);
+  }
+  if (connection.tenantValue !== input.browserTenant) {
+    throw new Error(
+      `Browser tenant ${input.browserTenant} does not match native connection tenant ${connection.tenantValue}`
+    );
+  }
   const service = (connection.productId || connection.service).trim().toLowerCase();
   const requestedService = batch.service;
   if (requestedService !== void 0 && service !== requestedService.trim().toLowerCase()) {
     throw new Error("Destination connection platform mismatch with requested service or contract");
   }
   const resolved = await executeResolveSaasSkill(service, credentials);
+  assertCurrentContract(batch, resolved);
   if (!resolved.supported || !resolved.playbook) {
     throw new Error(
       `${service} has no Relay SaaS skill; resolve the supported workflow before upload`
@@ -10700,7 +10791,10 @@ async function executeUploadNativeConnectionSettings(credentials, connectionId, 
     };
   } catch (error) {
     const detail = error instanceof ObsidianAPIError ? `HTTP ${error.statusCode}: ${JSON.stringify(error.detail)}` : error instanceof Error ? error.message : String(error);
-    throw new Error(`Failed to upload native settings to connection ${connectionId}: ${detail}`);
+    const outcome = error instanceof ObsidianAPIError ? "The API rejected the upload; correct the reported error before retrying." : "The upload result is unknown because the transport failed after the request may have been sent. Verify destination state before retrying; do not retry blindly.";
+    throw new Error(
+      `Failed to upload native settings to connection ${connectionId}: ${detail}. ${outcome}`
+    );
   }
 }
 
@@ -11273,34 +11367,36 @@ var TOOLS = [
   {
     name: "prepare_native_connection_settings",
     title: "Prepare Native Connection Settings",
-    description: "Prepare canonical native rows offline from observations and a server-held Relay contract. Returns rows, counts, bundle identity, destination, and a review digest. Does not upload.",
+    description: "Prepare canonical native rows offline from observations and a server-held Relay contract. Requires browser_tenant: the exact observed tenant identity. Returns rows, counts, bundle identity, destination, tenant, and a review digest. Does not upload.",
     inputSchema: objectSchema(
       {
         contract_ref: STRING,
         connection_id: STRING,
+        browser_tenant: STRING,
         observations: PostureObservationsSchema
       },
-      ["contract_ref", "connection_id", "observations"]
+      ["contract_ref", "connection_id", "browser_tenant", "observations"]
     ),
     annotations: annotations(true, false, true)
   },
   {
     name: "check_native_replay_bundle",
     title: "Check Native Replay Bundle",
-    description: "Compare a freshly resolved contract with a saved native playbook before browsing. Requires matching playbook version, source, and platform; returns the saved destination without changing the baseline.",
-    inputSchema: objectSchema({ contract_ref: STRING, playbook_name: STRING }, [
-      "contract_ref",
-      "playbook_name"
-    ]),
+    description: "Compare a freshly resolved contract with a saved native playbook. Requires matching playbook version, source, platform, and browser_tenant; returns the saved destination without changing the baseline. Before browsing, pass the saved browserTenant; upload repeats the check with the observed tenant. Older native playbooks missing browserTenant require interactive refresh.",
+    inputSchema: objectSchema(
+      { contract_ref: STRING, playbook_name: STRING, browser_tenant: STRING },
+      ["contract_ref", "playbook_name", "browser_tenant"]
+    ),
     annotations: annotations(true, false, true)
   },
   {
     name: "upload_native_connection_settings",
     title: "Upload Native Connection Settings",
-    description: "Revalidate contract observations and the reviewed digest or saved replay bundle before native upload. Resolves the destination's current Relay skill and permits legacy rows only when its contract is null. API acceptance does not prove downstream processing; no commit step.",
+    description: "Revalidate contract observations and the reviewed digest or saved replay bundle before native upload. Requires browser_tenant to match the current remote tenant exactly. Rejects contract or bundle drift; permits legacy rows only when the current contract is null. API acceptance does not prove downstream processing; no commit step.",
     inputSchema: {
       ...objectSchema({
         connection_id: STRING,
+        browser_tenant: STRING,
         service: STRING,
         settings: { type: "array", minItems: 1, items: NativeConnectionSettingSchema },
         contract_ref: STRING,
@@ -11312,20 +11408,22 @@ var TOOLS = [
         objectSchema(
           {
             connection_id: STRING,
+            browser_tenant: STRING,
             service: STRING,
             settings: { type: "array", minItems: 1, items: NativeConnectionSettingSchema }
           },
-          ["connection_id", "settings"]
+          ["connection_id", "browser_tenant", "settings"]
         ),
         ...["review_digest", "playbook_name"].map(
           (review) => objectSchema(
             {
               connection_id: STRING,
+              browser_tenant: STRING,
               contract_ref: STRING,
               observations: PostureObservationsSchema,
               [review]: STRING
             },
-            ["connection_id", "contract_ref", "observations", review]
+            ["connection_id", "browser_tenant", "contract_ref", "observations", review]
           )
         )
       ]
@@ -11382,7 +11480,7 @@ var TOOLS = [
   {
     name: "upload_posture_settings",
     title: "Upload Obsidian Posture Settings",
-    description: "Validate a connection, upload normalized settings, and commit them.",
+    description: "Custom-only: validate a current custom connection, upload normalized settings, and commit them. Send native observations to upload_native_connection_settings.",
     inputSchema: objectSchema(
       {
         ...OPTIONAL_SELECTORS,
@@ -11590,6 +11688,12 @@ function nonEmptyString2(value, name) {
 function optionalString(value) {
   return typeof value === "string" ? value : void 0;
 }
+function browserTenant(value) {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error("browser_tenant must be the non-empty tenant identity observed in the browser");
+  }
+  return value;
+}
 function credentialsFromEnv() {
   const apiKey = process.env.OBSIDIAN_API_TOKEN;
   const apiServer = process.env.OBSIDIAN_API_SERVER;
@@ -11627,7 +11731,7 @@ function normalizeSettings(value) {
     }
   });
 }
-async function ensureConnection2(args, dependencies) {
+async function ensureConnection(args, dependencies) {
   credentialsFromEnv();
   const name = nonEmptyString2(args.name, "name");
   const slug = name.toLowerCase().replace(/[^a-z0-9]+/gu, "-").replace(/^-|-$/gu, "");
@@ -11728,12 +11832,14 @@ var HANDLERS = {
     credentialsFromEnv(),
     nonEmptyString2(args.contract_ref, "contract_ref"),
     nonEmptyString2(args.connection_id, "connection_id"),
+    browserTenant(args.browser_tenant),
     args.observations
   ),
   check_native_replay_bundle: async (args) => executeCheckReplayBundle(
     credentialsFromEnv(),
     nonEmptyString2(args.contract_ref, "contract_ref"),
-    nonEmptyString2(args.playbook_name, "playbook_name")
+    nonEmptyString2(args.playbook_name, "playbook_name"),
+    browserTenant(args.browser_tenant)
   ),
   upload_native_connection_settings: (args) => executeUploadNativeConnectionSettings(
     credentialsFromEnv(),
@@ -11741,7 +11847,7 @@ var HANDLERS = {
     nativeUploadInput(args)
   ),
   approve_in_app_browser_action: (args, dependencies) => dependencies.browser.approve(args),
-  ensure_obsidian_connection: ensureConnection2,
+  ensure_obsidian_connection: ensureConnection,
   preview_connection_repair: (_args, dependencies) => repair(false, dependencies),
   apply_connection_repair: (_args, dependencies) => repair(true, dependencies),
   upload_posture_settings: uploadSettings,
@@ -11755,9 +11861,14 @@ var HANDLERS = {
 };
 function nativeUploadInput(args) {
   if ("settings" in args)
-    return { settings: args.settings, service: optionalString(args.service) };
+    return {
+      settings: args.settings,
+      service: optionalString(args.service),
+      browserTenant: browserTenant(args.browser_tenant)
+    };
   return {
     contractRef: nonEmptyString2(args.contract_ref, "contract_ref"),
+    browserTenant: browserTenant(args.browser_tenant),
     observations: args.observations,
     review: "review_digest" in args ? { digest: nonEmptyString2(args.review_digest, "review_digest") } : { playbookName: nonEmptyString2(args.playbook_name, "playbook_name") }
   };
@@ -11793,7 +11904,7 @@ async function handleToolCall(params, dependencies = DEFAULT_DEPENDENCIES) {
 }
 
 // src/mcp/server.ts
-var SERVER_INFO = { name: "ObSec", version: "0.2.0" };
+var SERVER_INFO = { name: "ObSec", version: "0.2.1" };
 var PARSE_ERROR = -32700;
 var INVALID_REQUEST = -32600;
 var METHOD_NOT_FOUND = -32601;
