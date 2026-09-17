@@ -11904,7 +11904,7 @@ async function handleToolCall(params, dependencies = DEFAULT_DEPENDENCIES) {
 }
 
 // src/mcp/server.ts
-var SERVER_INFO = { name: "ObSec", version: "0.2.1" };
+var SERVER_INFO = { name: "ObSec", version: "0.2.2" };
 var PARSE_ERROR = -32700;
 var INVALID_REQUEST = -32600;
 var METHOD_NOT_FOUND = -32601;
